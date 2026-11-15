@@ -10,8 +10,8 @@
   <h2>{{ lname }}{% if country %} · {{ country }}{% endif %}</h2>
   {% for f in fixtures %}
   <div class="card match-card" data-fid="{{ f.id }}"><a class="row" href="{{ url_for('match', fid=f.id) }}">
+    <div class="mtime"><span class="kick">{{ f.kickoff|hhmm }}</span><span class="live-badge" hidden></span></div>
     <div class="mrow">
-      <div class="mtime"><span class="kick">{{ f.kickoff|hhmm }}</span><span class="live-badge" hidden></span></div>
       <div class="mteam home"><span>{{ f.home }}</span>{% if f.home_logo %}<img class="logo" src="{{ f.home_logo }}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">{% endif %}</div>
       <div class="mscore" data-score>{% if f.home_goals is not none and f.status not in ('NS','TBD') %}{{ f.home_goals }} : {{ f.away_goals }}{% else %}–{% endif %}</div>
       <div class="mteam away">{% if f.away_logo %}<img class="logo" src="{{ f.away_logo }}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">{% endif %}<span>{{ f.away }}</span></div>

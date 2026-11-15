@@ -32,8 +32,9 @@ th{color:var(--mut);font-weight:500;font-size:13px}td.num,th.num{text-align:righ
 .form .W{background:#2ea043}.form .D{background:#6e7681}.form .L{background:#f85149}
 
 /* ---------- lista: sor elrendezés ---------- */
-.mrow{display:grid;grid-template-columns:56px 1fr auto 1fr;align-items:center;gap:10px}
-.mtime{display:flex;flex-direction:column;align-items:flex-start;gap:3px;font-size:13px;color:var(--mut)}
+.mrow{display:grid;grid-template-columns:1fr minmax(64px,auto) 1fr;align-items:center;gap:10px}
+.mtime{display:flex;justify-content:center;align-items:center;margin-bottom:6px;min-height:18px;font-size:13px;color:var(--mut)}
+.mtime [hidden]{display:none}
 .mteam{display:flex;align-items:center;gap:8px;font-weight:600;min-width:0}
 .mteam span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mteam.home{justify-content:flex-end;text-align:right}
@@ -107,7 +108,7 @@ th{color:var(--mut);font-weight:500;font-size:13px}td.num,th.num{text-align:righ
 .st-bars .a i{background:linear-gradient(90deg,#388bfd,#79c0ff)}
 
 @media (max-width:520px){
-  .mrow{grid-template-columns:44px 1fr auto 1fr;gap:6px}
+  .mrow{gap:6px}
   .sb-logo{width:48px;height:48px}.sb-name{font-size:14px}.sb-score{font-size:42px}.sb-center{min-width:90px}
   .logo{width:18px;height:18px}.mteam{font-size:14px}
 }
@@ -118,3 +119,6 @@ header form button{white-space:nowrap}
   .state-pill{white-space:nowrap;font-size:11px;padding:2px 6px}
   header{gap:10px;padding:10px 12px}
 }
+
+.sb-score span:empty{display:none}
+.sb-center{display:flex;flex-direction:column;align-items:center}
