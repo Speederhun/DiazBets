@@ -12,7 +12,7 @@ from apifootball import DAILY_BUDGET
 import collect
 import live
 import model
-from db import connect, init_db
+from db import HIDDEN_SQL, connect, init_db
 
 TZ = ZoneInfo("Europe/Budapest")
 
@@ -143,7 +143,7 @@ def index():
     except ValueError:
         abort(400)
     conn = connect()
-    fixtures = conn.execute("SELECT * FROM fixtures WHERE day = ? ORDER BY league_id, kickoff", (day,)).fetchall()
+    fixtures = conn.execute(f"SELECT * FROM fixtures WHERE day = ? AND league_id NOT IN ({HIDDEN_SQL}) ORDER BY league_id, kickoff", (day,)).fetchall()
     tips = {}
     for t in conn.execute("SELECT t.* FROM tips t JOIN fixtures f ON f.id = t.fixture_id WHERE f.day = ?", (day,)):
         tips.setdefault(t["fixture_id"], {})[t["market"]] = t

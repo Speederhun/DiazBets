@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 
 import model
 from apifootball import DAILY_BUDGET, PRO, ApiError, BudgetExceeded, Client, used_today
-from db import connect, init_db
+from db import HIDDEN_SQL, connect, init_db
 
 TZ = ZoneInfo("Europe/Budapest")
 
@@ -80,6 +80,17 @@ def purge_youth(conn):
             col = "fixture_id"
             conn.execute(f"DELETE FROM {table} WHERE {col} = ?", (fid,))
         conn.execute("DELETE FROM fixtures WHERE id = ?", (fid,))
+    conn.commit()
+    return len(ids)
+
+
+def purge_hidden_data(conn):
+    """A rejtett ligák meccseihez korábban tárolt tippek, szorzók stb. törlése (maguk a meccsek, vagyis az eredmények maradnak)."""
+    ids = [r["id"] for r in conn.execute(f"SELECT id FROM fixtures WHERE league_id IN ({HIDDEN_SQL})").fetchall()]
+    for fid in ids:
+        for table in ("odds", "odds_sharp", "odds_history", "injuries", "h2h", "predictions", "api_predictions",
+                      "live_snapshots", "tips", "fixture_stats"):
+            conn.execute(f"DELETE FROM {table} WHERE fixture_id = ?", (fid,))
     conn.commit()
     return len(ids)
 
@@ -231,7 +242,7 @@ def store_stats(conn, fixture_id, items):
 
 
 # még nincs statisztikája, vagy az xG előtti verzióval lett letöltve (akkor újra kell kérni az xG-ért)
-NEEDS_STATS = """status = 'FT' AND (
+NEEDS_STATS = f"""status = 'FT' AND league_id NOT IN ({HIDDEN_SQL}) AND (
     NOT EXISTS (SELECT 1 FROM fixture_stats s WHERE s.fixture_id = f.id)
     OR EXISTS (SELECT 1 FROM fixture_stats s WHERE s.fixture_id = f.id AND COALESCE(s.v2, 0) = 0))"""
 
@@ -290,13 +301,14 @@ def collect(day=None):
     purged = purge_youth(conn)
     if purged:
         log(f"{purged} ifjúsági/női meccs törölve az adatbázisból")
+    purge_hidden_data(conn)
     try:
         data = client.get("fixtures", date=day, timezone="Europe/Budapest")
         n = store_fixtures(conn, data.get("response", []), day)
         mark_day(conn, day)
         log(f"{day}: {n} meccs a figyelt ligákból")
 
-        fixtures = conn.execute("SELECT * FROM fixtures WHERE day = ? AND status = 'NS' ORDER BY kickoff",
+        fixtures = conn.execute(f"SELECT * FROM fixtures WHERE day = ? AND status = 'NS' AND league_id NOT IN ({HIDDEN_SQL}) ORDER BY kickoff",
                                 (day,)).fetchall()
         ordered = sorted(fixtures, key=lambda f: LEAGUE_ORDER.get(f["league_id"], 99))
         if not ordered:
@@ -509,7 +521,7 @@ def refresh_odds(day=None):
     day = day or today()
     client = Client(conn)
     try:
-        pending = conn.execute("SELECT COUNT(*) FROM fixtures WHERE day=? AND status='NS'", (day,)).fetchone()[0]
+        pending = conn.execute(f"SELECT COUNT(*) FROM fixtures WHERE day=? AND status='NS' AND league_id NOT IN ({HIDDEN_SQL})", (day,)).fetchone()[0]
         if not pending:
             log(f"{day}: nincs kezdés előtti meccs, nincs mit frissíteni")
             return
@@ -621,7 +633,7 @@ def generate_tips(conn, day):
     c_teams, c_avg_h, c_avg_a = model.corner_table(corner_rows)
     weight = float(os.environ.get("DIAZBETS_MARKET_WEIGHT", "0.5"))
     count = 0
-    for f in conn.execute("SELECT * FROM fixtures WHERE day = ? AND status = 'NS'", (day,)).fetchall():
+    for f in conn.execute(f"SELECT * FROM fixtures WHERE day = ? AND status = 'NS' AND league_id NOT IN ({HIDDEN_SQL})", (day,)).fetchall():
         odds = load_odds(conn, f["id"])
         xg = None
         extra = []

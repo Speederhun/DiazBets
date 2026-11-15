@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 import model
 from apifootball import DAILY_BUDGET, PRO, ApiError, BudgetExceeded, Client, used_today
+from db import HIDDEN_SQL
 
 LIVE_STATUSES = {"1H", "HT", "2H", "ET", "BT", "P", "SUSP", "INT", "LIVE"}
 PLAYED_FINAL = {"FT", "AET", "PEN"}
@@ -181,7 +182,7 @@ def refresh_live(conn):
         return {"enabled": False, "fixtures": {}}
     now = datetime.now(timezone.utc)
     since = (now - timedelta(days=1)).strftime("%Y-%m-%d")
-    rows = conn.execute("SELECT * FROM fixtures WHERE day >= ?", (since,)).fetchall()
+    rows = conn.execute(f"SELECT * FROM fixtures WHERE day >= ? AND league_id NOT IN ({HIDDEN_SQL})", (since,)).fetchall()
     cands = [f for f in rows if f["status"] not in FINAL_STATUSES and in_window(f, now)]
     live_items = {}
     if cands:
@@ -204,7 +205,7 @@ def refresh_live(conn):
                 match_item(conn, f)
 
     out = {}
-    for f in conn.execute("SELECT * FROM fixtures WHERE day >= ?", (since,)).fetchall():
+    for f in conn.execute(f"SELECT * FROM fixtures WHERE day >= ? AND league_id NOT IN ({HIDDEN_SQL})", (since,)).fetchall():
         if f["status"] in ("NS", "TBD"):
             continue
         it = live_items.get(f["id"])

@@ -565,3 +565,25 @@ def test_youth_and_women_friendlies_are_filtered():
     assert conn.execute("SELECT COUNT(*) FROM fixtures WHERE id IN (6400, 6402)").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM fixtures WHERE id = 6401").fetchone()[0] == 1
     conn.close()
+
+
+def test_friendlies_feed_the_model_but_are_hidden():
+    from db import connect, init_db
+    init_db()
+    conn = connect()
+    conn.execute("""INSERT OR REPLACE INTO fixtures(id, day, kickoff, league_id, league_name, season, home_id, home, away_id, away, status, home_goals, away_goals)
+                    VALUES (6500,'2026-11-10','2026-11-10T15:00:00+01:00',10,'Friendlies',2026,65001,'Aland',65002,'Bland','FT',2,0)""")
+    conn.execute("""INSERT OR REPLACE INTO fixtures(id, day, kickoff, league_id, league_name, season, home_id, home, away_id, away, status)
+                    VALUES (6501,'2026-11-15','2026-11-15T15:00:00+01:00',10,'Friendlies',2026,65003,'Cland',65004,'Dland','NS')""")
+    conn.execute("INSERT OR REPLACE INTO tips(fixture_id, market, pick, prob) VALUES (6501,'1X2','Home',0.5)")
+    conn.commit()
+    teams, _, _ = model.load_results_table(conn, "2026-11-15")
+    assert 65001 in teams                                    # az eredmény beleszámít a modellbe
+    assert collect.purge_hidden_data(conn) >= 2
+    assert conn.execute("SELECT COUNT(*) FROM tips WHERE fixture_id=6501").fetchone()[0] == 0
+    conn.close()
+    from app import app
+    c = app.test_client()
+    c.post("/login", data={"username": "teszt", "password": "jelszo1234"})
+    page = c.get("/?d=2026-11-15").get_data(as_text=True)
+    assert "Cland" not in page and "Friendlies" not in page  # a listán nem látszik

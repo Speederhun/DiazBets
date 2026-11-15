@@ -1,6 +1,10 @@
 import os
 import sqlite3
 
+# Ligák, amelyek eredménye csak a modellt táplálja (Elo, erő), de nem látszik a listán, nincs hozzájuk tipp és élő követés
+HIDDEN_LEAGUES = (10,)  # 10 = barátságos válogatott meccsek
+HIDDEN_SQL = ",".join(str(i) for i in HIDDEN_LEAGUES)
+
 DB_PATH = os.environ.get("DIAZBETS_DB", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "diazbets.sqlite"))
 
 SCHEMA = """
