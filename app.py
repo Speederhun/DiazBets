@@ -9,6 +9,7 @@ from flask import Flask, abort, jsonify, redirect, render_template, request, ses
 from werkzeug.security import check_password_hash
 
 from apifootball import DAILY_BUDGET
+import collect
 import live
 import model
 from db import connect, init_db
@@ -156,19 +157,19 @@ def index():
     moves = odds_moves(conn, [f["id"] for f in fixtures])
     api_preds = {r["fixture_id"]: r for r in conn.execute(
         "SELECT a.* FROM api_predictions a JOIN fixtures f ON f.id = a.fixture_id WHERE f.day = ?", (day,))}
+    sharp = _sharp_for(conn, [f["id"] for f in fixtures])
+    elo = collect.load_elo(conn, day)
     conn.close()
     diverge = {}
-    for fid, pr in preds.items():
-        lam = (pr["lam_h"], pr["lam_a"]) if pr["lam_h"] is not None else None
-        o = odds.get(fid, {})
-        dv = model.divergence(model.opinions(lam, api_preds.get(fid), {("1X2", k): v for k, v in o.items()}))
+    for f in fixtures:
+        fid = f["id"]
+        pr = preds.get(fid)
+        lam = (pr["lam_h"], pr["lam_a"]) if pr is not None and pr["lam_h"] is not None else None
+        o = {("1X2", k): v for k, v in odds.get(fid, {}).items()}
+        ops = model.opinions(lam, api_preds.get(fid), o, sharp.get(fid), _elo_opinion(elo, f["home_id"], f["away_id"]))
+        dv = model.divergence(ops)
         if dv:
             diverge[fid] = dv
-    for fid in api_preds:
-        if fid not in diverge and fid not in preds:
-            dv = model.divergence(model.opinions(None, api_preds[fid], {("1X2", k): v for k, v in odds.get(fid, {}).items()}))
-            if dv:
-                diverge[fid] = dv
     # a tippelt kimenet szorzómozgása, ha jelentős (>=4%)
     tip_moves = {}
     for fid, ts in tips.items():
@@ -181,6 +182,23 @@ def index():
         groups.setdefault((f["league_id"], f["league_name"], f["country"]), []).append(f)
     return render_template("index.html", day=day, groups=groups, tips=tips, odds=odds, preds=preds, tip_moves=tip_moves, diverge=diverge,
                            prev_day=_shift(day, -1), next_day=_shift(day, 1), api_used=used["count"] if used else 0, api_budget=DAILY_BUDGET)
+
+
+def _sharp_for(conn, fixture_ids):
+    out = {}
+    if not fixture_ids:
+        return out
+    q = ",".join("?" * len(fixture_ids))
+    for r in conn.execute(f"SELECT * FROM odds_sharp WHERE fixture_id IN ({q})", list(fixture_ids)):
+        out.setdefault(r["fixture_id"], {})[(r["market"], r["selection"])] = r["price"]
+    return out
+
+
+def _elo_opinion(elo, home_id, away_id):
+    eh, ea = elo.get(home_id), elo.get(away_id)
+    if eh and ea and eh["n"] >= 5 and ea["n"] >= 5:
+        return model.elo_probs(eh["elo"], ea["elo"])
+    return None
 
 
 def odds_moves(conn, fixture_ids):
@@ -229,9 +247,14 @@ def match(fid):
     form = {tid: teams[tid] for tid in (f["home_id"], f["away_id"]) if tid in teams}
     api = conn.execute("SELECT * FROM api_predictions WHERE fixture_id = ?", (fid,)).fetchone()
     st = conn.execute("SELECT json FROM standings WHERE league_id = ? AND season = ?", (f["league_id"], f["season"])).fetchone()
-    conn.close()
+    sharp = _sharp_for(conn, [fid]).get(fid)
+    conn2 = conn
     lam = (pred["lam_h"], pred["lam_a"]) if pred and pred["lam_h"] is not None else None
-    ops = model.opinions(lam, api, {("1X2", s["selection"]): s["price"] for s in odds.get("1X2", [])})
+    elo = collect.load_elo(conn2, f["day"])
+    ops = model.opinions(lam, api, {("1X2", s["selection"]): s["price"] for s in odds.get("1X2", [])}, sharp,
+                         _elo_opinion(elo, f["home_id"], f["away_id"]))
+    elo_rating = {tid: elo[tid] for tid in (f["home_id"], f["away_id"]) if tid in elo}
+    conn.close()
     diverge = model.divergence(ops)
     table, rank = None, {}
     if st:
@@ -254,7 +277,7 @@ def match(fid):
                 else:
                     aw += 1
         h2h_summary = {"home": hw, "draw": dr, "away": aw}
-    return render_template("match.html", f=f, tips=tips, odds=odds, moves=moves, injuries=injuries, pred=pred, heat=heat, ops=ops, diverge=diverge, api=api, table=table, rank=rank,
+    return render_template("match.html", f=f, tips=tips, odds=odds, moves=moves, injuries=injuries, pred=pred, heat=heat, ops=ops, diverge=diverge, api=api, sharp=sharp, elo_rating=elo_rating, table=table, rank=rank,
                            h2h=h2h, h2h_summary=h2h_summary, form=form)
 
 

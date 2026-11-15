@@ -25,7 +25,7 @@
 </section>
 
 {% if pred %}
-<h2>Esélyek <span class="h2-sub">modell, piac és API vegyítve</span> <span class="live-tag" id="prob-live" hidden>élő állás szerint</span></h2>
+<h2>Esélyek <span class="h2-sub">modell, piac, API és Elo vegyítve</span> <span class="live-tag" id="prob-live" hidden>élő állás szerint</span></h2>
 <div class="card pad" id="prob-card" data-pred="1">{{ pbar(pred, 'big') }}</div>
 {% endif %}
 
@@ -68,7 +68,7 @@
   {% for o in ops %}
   <div class="op"><div class="op-label">{{ o.label }}{% if o.key == "model" %} <span class="note">· tisztán a saját számítás, a piac nélkül</span>{% endif %}</div>{{ pbar(o, 'compact') }}</div>
   {% endfor %}
-  <div class="note">A felső „Esélyek” sáv és a tippek a három forrás súlyozott átlagát használják. Kevés meccsű csapatnál a saját modell súlya kicsi, a piacé és az API-é nagyobb, ezért a sáv nem egyezik a tiszta modellel.</div>
+  <div class="note">A felső „Esélyek” sáv és a tippek a források súlyozott átlagát használják. Kevés meccsű csapatnál a saját modell súlya kicsi, a piacé és az API-é nagyobb, ezért a sáv nem egyezik a tiszta modellel.</div>
   {% if diverge %}
   <div class="diverge">⚠ <b>Nagy eltérés ({{ diverge.outcome }}):</b>
     {% for name, v in diverge['items'] %}{{ name }} {{ (v * 100)|round|int }}%{{ ' · ' if not loop.last }}{% endfor %}
@@ -101,7 +101,7 @@
 <h2>Forma (utolsó 5, minden figyelt bajnokságból)</h2>
 <div class="card pad">
   {% for tid, t in form.items() %}
-  <div>{{ t.name }}{% if rank.get(tid) %} <span class="rank">{{ rank[tid].rank }}. hely · {{ rank[tid].points }} pont</span>{% endif %} <span class="note">({{ t.hp + t.ap }} meccs az adatbázisban)</span>
+  <div>{{ t.name }}{% if rank.get(tid) %} <span class="rank">{{ rank[tid].rank }}. hely · {{ rank[tid].points }} pont</span>{% endif %}{% if elo_rating.get(tid) and elo_rating[tid].n >= 5 %} <span class="rank" title="Saját Elo-érték az adatbázis összes meccséből">Elo {{ elo_rating[tid].elo|round|int }}</span>{% endif %} <span class="note">({{ t.hp + t.ap }} meccs az adatbázisban)</span>
     <span class="form">{% for c in t.form %}<span class="{{ c }}">{{ c }}</span>{% endfor %}</span></div>
   {% endfor %}
 </div>
@@ -128,6 +128,8 @@
   </div>
   {% endfor %}
 </div>
+{% if sharp %}<div class="card pad" style="margin-top:8px"><b>Éles iroda:</b>
+  {% for (mk, sel), price in sharp.items() %}{{ mk }} {{ sel }} <b>{{ '%.2f'|format(price) }}</b>{{ ' · ' if not loop.last }}{% endfor %}</div>{% endif %}
 {% if moves %}<p class="note">A nyilak a szorzó mozgását mutatják a nyitó értékhez képest. Esés (▼): a piac inkább ezt a kimenetet várja, emelkedés (▲): kevésbé. Gyakran sérülés vagy a kezdőcsapat híre áll mögötte.</p>{% endif %}
 {% else %}<p class="note">Nincs szorzó (még nem érkezett meg, vagy elfogyott a napi keret).</p>{% endif %}
 

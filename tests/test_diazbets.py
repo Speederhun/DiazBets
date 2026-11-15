@@ -455,3 +455,90 @@ def test_api_blend_pulls_toward_api_when_data_is_scarce():
     assert out["BTTS"] == 0.5                       # csak az 1X2-t érinti
     assert model.blend_api(probs, None, 0.3) == probs
     assert model.blend_api(probs, {"p_home": None, "p_draw": None, "p_away": None}, 0.3) == probs
+
+
+# ---------------------------------------------------------------- xG, hosszabb előzmény, kulcsjátékosok, éles iroda, Elo
+
+def test_xg_feeds_team_strength_and_stats_refetch_logic():
+    rows = [{"home_id": 1, "home": "A", "away_id": 2, "away": "B", "hg": 0, "ag": 0, "day": "2026-01-01", "hxg": 2.0, "axg": 0.5}]
+    teams, ah, aa = model.team_table_from_results(rows, now_day="2026-01-02")
+    assert abs(teams[1]["hgf"] - 0.65 * 2.0) < 1e-9 and abs(teams[2]["agf"] - 0.65 * 0.5) < 1e-9   # xG-vel kevert gól
+    plain, _, _ = model.team_table_from_results([{**rows[0], "hxg": None, "axg": None}], now_day="2026-01-02")
+    assert plain[1]["hgf"] == 0
+    from db import connect, init_db
+    init_db()
+    conn = connect()
+    conn.execute("""INSERT OR REPLACE INTO fixtures(id, day, kickoff, league_id, season, home_id, home, away_id, away, status, home_goals, away_goals)
+                    VALUES (6100,'2026-11-01','2026-11-01T15:00:00+01:00',39,2026,71,'X',72,'Y','FT',1,0)""")
+    conn.execute("INSERT OR REPLACE INTO fixture_stats(fixture_id, team_id, corners) VALUES (6100, 71, 5)")  # régi, xG előtti sor
+    conn.commit()
+    need = lambda: conn.execute(f"SELECT COUNT(*) FROM fixtures f WHERE id=6100 AND {collect.NEEDS_STATS}").fetchone()[0]
+    assert need() == 1                      # a régi sort újra kell kérni az xG-ért
+    collect.store_stats(conn, 6100, [
+        {"team": {"id": 71}, "statistics": [{"type": "Corner Kicks", "value": 6}, {"type": "expected_goals", "value": "1.32"}]},
+        {"team": {"id": 72}, "statistics": [{"type": "Corner Kicks", "value": 3}, {"type": "expected_goals", "value": None}]}])
+    assert need() == 0
+    r = {x["team_id"]: x for x in conn.execute("SELECT * FROM fixture_stats WHERE fixture_id=6100")}
+    assert abs(r[71]["xg"] - 1.32) < 1e-9 and r[72]["xg"] is None and r[71]["corners"] == 6 and 0 not in r
+    conn.close()
+
+
+def test_key_players_and_loss_cap():
+    assert model.key_loss([]) == 0
+    assert abs(model.key_loss([(0.3, 1.0)]) - 0.15) < 1e-9 or model.key_loss([(0.3, 1.0)]) <= model.KEY_CAP
+    assert model.key_loss([(0.9, 1.0), (0.9, 1.0)]) == model.KEY_CAP            # plafon
+    assert model.key_loss([(0.2, 0.5)]) < model.key_loss([(0.2, 1.0)])          # a kérdéses kevesebbet számít
+    rows = [{"home_id": 1, "home": "A", "away_id": 2, "away": "B", "hg": 1, "ag": 1, "day": "2026-01-01"}] * 6
+    teams, ah, aa = model.team_table_from_results(rows, now_day="2026-01-02")
+    base = model.expected_goals(teams, ah, aa, 1, 2, {})
+    out = model.expected_goals(teams, ah, aa, 1, 2, {"key_h": 0.10})
+    assert abs(out[0] - base[0] * 0.9) < 1e-9 and out[1] == base[1]
+
+    from db import connect
+    conn = connect()
+    conn.execute("""INSERT OR REPLACE INTO fixtures(id, day, kickoff, league_id, season, home_id, home, away_id, away, status)
+                    VALUES (6200,'2026-11-20','2026-11-20T20:00:00+01:00',39,2026,81,'H',82,'V','NS')""")
+    conn.execute("DELETE FROM injuries WHERE fixture_id=6200")
+    conn.execute("INSERT INTO injuries(fixture_id, team_id, team, player, type, reason, player_id) VALUES (6200,81,'H','Góllövő','Missing Fixture','x',555)")
+    conn.execute("INSERT INTO injuries(fixture_id, team_id, team, player, type, reason, player_id) VALUES (6200,81,'H','Névtelen','Missing Fixture','x',556)")
+    conn.execute("INSERT OR REPLACE INTO key_players(league_id, season, player_id, team_id, name, goals, assists, fetched_day) VALUES (39,2026,555,81,'Góllövő',10,4,'2026-11-15')")
+    conn.commit()
+    f = conn.execute("SELECT * FROM fixtures WHERE id=6200").fetchone()
+    km = collect.key_missing(conn, f, 81, 30)
+    assert len(km) == 1 and km[0][0] == "Góllövő" and abs(km[0][1] - 12 / 30) < 1e-9
+    assert collect.key_missing(conn, f, 81, None) == []
+    conn.close()
+
+
+def test_sharp_odds_consensus_and_storage():
+    main = {("1X2", "Home"): 2.0, ("1X2", "Draw"): 3.5, ("1X2", "Away"): 4.0}
+    sharp = {("1X2", "Home"): 1.8, ("1X2", "Draw"): 3.6, ("1X2", "Away"): 4.8}
+    cm, cs = model.market_probs(main), model.market_probs(sharp)
+    mix = model.consensus_probs(main, sharp)
+    assert abs(mix["Home"] + mix["Draw"] + mix["Away"] - 1) < 1e-9
+    assert cm["Home"] < mix["Home"] < cs["Home"] and abs(mix["Home"] - cs["Home"]) < abs(mix["Home"] - cm["Home"])  # az éles iroda többet számít
+    assert model.consensus_probs(main, None) == model.market_probs(main)
+    blended = model.blend({"Home": 0.2, "Draw": 0.3, "Away": 0.5, "BTTS": 0.5, "Over25": 0.5}, main, 0.5, mk=mix)
+    assert abs(blended["Home"] - (0.5 * 0.2 + 0.5 * mix["Home"]) / 1) < 0.05
+    from db import connect
+    conn = connect()
+    conn.execute("""INSERT OR REPLACE INTO fixtures(id, day, kickoff, league_id, season, home_id, home, away_id, away, status)
+                    VALUES (6300,'2026-11-21','2026-11-21T20:00:00+01:00',39,2026,91,'H',92,'V','NS')""")
+    conn.commit()
+    items = [{"fixture": {"id": 6300}, "bookmakers": [{"bets": [{"id": 1, "values": [{"value": "Home", "odd": "1.8"}]}]}]}]
+    collect.store_odds(conn, items, table="odds_sharp")
+    assert collect.load_sharp(conn, 6300) == {("1X2", "Home"): 1.8}
+    assert conn.execute("SELECT COUNT(*) FROM odds_history WHERE fixture_id=6300").fetchone()[0] == 0   # az éles iroda nem naplózza a mozgást
+    conn.close()
+
+
+def test_elo_ratings_and_probs():
+    elo = model.compute_elo([(1, 2, 3, 0)] * 12 + [(2, 3, 1, 0)] * 6)   # 1 > 2 > 3 (2 legyőzi 3-at)
+    assert elo[1]["elo"] > 1500 > elo[3]["elo"] and elo[1]["n"] == 12
+    p = model.elo_probs(1500, 1500)
+    assert p["Home"] > p["Away"] and abs(sum(p.values()) - 1) < 1e-9 and 0.22 < p["Draw"] < 0.30
+    strong = model.elo_probs(1800, 1400)
+    assert strong["Home"] > 0.75 and strong["Draw"] < p["Draw"]
+    assert model.elo_weight(0.1, 3) == 0.0 and model.elo_weight(0.1, 5) > model.elo_weight(0.1, 30) == 0.1
+    ops = model.opinions((1.4, 1.4), None, {}, None, p)
+    assert [o["key"] for o in ops] == ["model", "elo"]

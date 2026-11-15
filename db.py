@@ -88,6 +88,24 @@ CREATE TABLE IF NOT EXISTS api_predictions (
     p_home REAL, p_draw REAL, p_away REAL,
     advice TEXT, winner TEXT, under_over TEXT, goals_h TEXT, goals_a TEXT
 );
+CREATE TABLE IF NOT EXISTS odds_sharp (
+    fixture_id INTEGER NOT NULL,
+    market TEXT NOT NULL,
+    selection TEXT NOT NULL,
+    price REAL NOT NULL,
+    PRIMARY KEY (fixture_id, market, selection)
+);
+CREATE TABLE IF NOT EXISTS key_players (
+    league_id INTEGER NOT NULL,
+    season INTEGER NOT NULL,
+    player_id INTEGER NOT NULL,
+    team_id INTEGER,
+    name TEXT,
+    goals INTEGER NOT NULL DEFAULT 0,
+    assists INTEGER NOT NULL DEFAULT 0,
+    fetched_day TEXT,
+    PRIMARY KEY (league_id, season, player_id)
+);
 CREATE TABLE IF NOT EXISTS odds_history (
     fixture_id INTEGER NOT NULL,
     market TEXT NOT NULL,
@@ -121,8 +139,14 @@ def connect():
 def init_db():
     conn = connect()
     conn.executescript(SCHEMA)
-    cols = [r["name"] for r in conn.execute("PRAGMA table_info(tips)")]
-    if "raw_prob" not in cols:  # a kalibráció előtti (nyers) modell-esély, ebből tanul a kalibráció
-        conn.execute("ALTER TABLE tips ADD COLUMN raw_prob REAL")
+    def add_col(table, col, decl):
+        cols = [r["name"] for r in conn.execute(f"PRAGMA table_info({table})")]
+        if col not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+
+    add_col("tips", "raw_prob", "REAL")        # a kalibráció előtti (nyers) modell-esély, ebből tanul a kalibráció
+    add_col("fixture_stats", "xg", "REAL")     # a csapat várható gólja (xG) az adott meccsen
+    add_col("fixture_stats", "v2", "INTEGER DEFAULT 0")  # 1: már az xG-s verzióval lett letöltve
+    add_col("injuries", "player_id", "INTEGER")
     conn.commit()
     conn.close()

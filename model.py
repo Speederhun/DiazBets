@@ -60,6 +60,15 @@ def _venue(t, side, avg_venue, avg_mean, for_goals):
     return (vgoals + SHRINK_GAMES * prior) / (vgames + SHRINK_GAMES) / avg_venue
 
 
+KEY_CAP = 0.15  # a kulcsjátékosok hiánya legfeljebb ennyivel viheti le a csapat várható góljait
+
+
+def key_loss(items):
+    """items: [(a játékos részesedése a csapat góljaiból+gólpasszaiból 0..1, súly 1=biztos kiesés / 0.5=kérdéses)].
+    A kieső játékos termelésének kb. a felét veszti el a csapat (a cserék pótolnak)."""
+    return min(KEY_CAP, sum(0.5 * share * wt for share, wt in items))
+
+
 def fatigue_factor(rest_days):
     """Kevés pihenőnap kicsit visszaveti a csapat támadását (kis, óvatos korrekció)."""
     if rest_days is None:
@@ -96,8 +105,8 @@ def expected_goals(teams, avg_home, avg_away, home_id, away_id, adj=None):
     if adj:
         own_h, opp_h = injury_factors(adj.get("inj_h"))
         own_a, opp_a = injury_factors(adj.get("inj_a"))
-        lam_h *= fatigue_factor(adj.get("rest_h")) * own_h * opp_a
-        lam_a *= fatigue_factor(adj.get("rest_a")) * own_a * opp_h
+        lam_h *= fatigue_factor(adj.get("rest_h")) * own_h * opp_a * (1 - min(KEY_CAP, adj.get("key_h") or 0))
+        lam_a *= fatigue_factor(adj.get("rest_a")) * own_a * opp_h * (1 - min(KEY_CAP, adj.get("key_a") or 0))
     return lam_h, lam_a
 
 
@@ -175,7 +184,9 @@ def tips_from_odds(odds):
 MIN_GAMES = 3  # csapatonként ennyi lejátszott meccs kell a saját becsléshez
 
 
-HALF_LIFE_DAYS = 70  # ennyi nap után számít a meccs fele annyit: a friss forma többet nyom
+HALF_LIFE_DAYS = 100  # ennyi nap után számít a meccs fele annyit: a friss forma többet nyom, a régi még előzetes tudás
+XG_MIX = 0.65          # ha van xG, a csapat erejébe ennyi részben az xG, a többiben a tényleges gól számít
+HISTORY_DAYS = 730     # ennyi napnyi eredményt tölt be a modell (a lecsengő súly miatt a régi már keveset számít)
 
 
 def _decay(day, now_day, half_life=HALF_LIFE_DAYS):
@@ -202,31 +213,41 @@ def team_table_from_results(rows, now_day=None):
                                       "w_hp": 0.0, "w_hgf": 0.0, "w_hga": 0.0,
                                       "w_ap": 0.0, "w_agf": 0.0, "w_aga": 0.0})
 
+    def val(r, k):
+        return r[k] if k in r.keys() else None
+
     for r in rows:
         h, a = t(r["home_id"], r["home"]), t(r["away_id"], r["away"])
         hg, ag = r["hg"], r["ag"]
-        w = _decay(r["day"] if "day" in r.keys() else None, now_day)
-        h["hp"] += 1; h["hgf"] += hg; h["hga"] += ag
-        a["ap"] += 1; a["agf"] += ag; a["aga"] += hg
-        h["w_hp"] += w; h["w_hgf"] += w * hg; h["w_hga"] += w * ag
-        a["w_ap"] += w; a["w_agf"] += w * ag; a["w_aga"] += w * hg
+        w = _decay(val(r, "day"), now_day)
+        # a "hatékony" gól: xG és tényleges gól keveréke (ha van xG), így kevésbé zajos
+        hxg, axg = val(r, "hxg"), val(r, "axg")
+        eh, ea = (XG_MIX * hxg + (1 - XG_MIX) * hg, XG_MIX * axg + (1 - XG_MIX) * ag) if hxg is not None and axg is not None else (hg, ag)
+        h["hp"] += 1; h["hgf"] += eh; h["hga"] += ea
+        a["ap"] += 1; a["agf"] += ea; a["aga"] += eh
+        h["w_hp"] += w; h["w_hgf"] += w * eh; h["w_hga"] += w * ea
+        a["w_ap"] += w; a["w_agf"] += w * ea; a["w_aga"] += w * eh
         h["form"] = (h["form"] + ("W" if hg > ag else "D" if hg == ag else "L"))[-5:]
         a["form"] = (a["form"] + ("W" if ag > hg else "D" if hg == ag else "L"))[-5:]
-        tot_h += hg
-        tot_a += ag
+        tot_h += eh
+        tot_a += ea
         n += 1
     if n == 0:
         return teams, None, None
     return teams, tot_h / n, tot_a / n
 
 
-def load_results_table(conn, upto_day, days=150):
+def load_results_table(conn, upto_day, days=HISTORY_DAYS):
     from datetime import datetime, timedelta
     cutoff = (datetime.strptime(upto_day, "%Y-%m-%d") - timedelta(days=days)).strftime("%Y-%m-%d")
     rows = conn.execute(
-        """SELECT home_id, home, away_id, away, home_goals AS hg, away_goals AS ag, day
-           FROM fixtures WHERE status = 'FT' AND home_goals IS NOT NULL AND away_goals IS NOT NULL
-             AND day >= ? AND day <= ? ORDER BY kickoff""", (cutoff, upto_day)).fetchall()
+        """SELECT f.home_id, f.home, f.away_id, f.away, f.home_goals AS hg, f.away_goals AS ag, f.day,
+                  sh.xg AS hxg, sa.xg AS axg
+           FROM fixtures f
+           LEFT JOIN fixture_stats sh ON sh.fixture_id = f.id AND sh.team_id = f.home_id
+           LEFT JOIN fixture_stats sa ON sa.fixture_id = f.id AND sa.team_id = f.away_id
+           WHERE f.status = 'FT' AND f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL
+             AND f.day >= ? AND f.day <= ? ORDER BY f.kickoff""", (cutoff, upto_day)).fetchall()
     return team_table_from_results(rows, now_day=upto_day)
 
 
@@ -336,11 +357,27 @@ def market_probs(odds):
     return out
 
 
-def blend(probs, odds, w):
-    """Saját modell és piaci esély súlyozott átlaga. w = a piac súlya (0..1)."""
+def consensus_probs(odds, sharp=None, sharp_w=0.65):
+    """Piaci esély: a fő iroda és (ha van) az éles iroda szorzóiból, az árrés levonása után; az éles iroda többet számít."""
+    main = market_probs(odds or {})
+    if not sharp:
+        return main
+    sh = market_probs(sharp)
+    out = dict(main)
+    for k, v in sh.items():
+        out[k] = (1 - sharp_w) * main[k] + sharp_w * v if k in main else v
+    if all(k in out for k in ("Home", "Draw", "Away")):
+        s = out["Home"] + out["Draw"] + out["Away"]
+        for k in ("Home", "Draw", "Away"):
+            out[k] /= s
+    return out
+
+
+def blend(probs, odds, w, mk=None):
+    """Saját modell és piaci esély súlyozott átlaga. w = a piac súlya (0..1). mk: kész piaci esélyek (nem kötelező)."""
     if not w:
         return probs
-    mk = market_probs(odds)
+    mk = mk if mk is not None else market_probs(odds)
     out = dict(probs)
     for k, v in mk.items():
         out[k] = (1 - w) * probs[k] + w * v
@@ -354,6 +391,19 @@ def api_weight(base, games):
     """Az API-Football előrejelzésének súlya: alapból kicsi, kevés meccsű csapatnál (ahol a saját modell vak) nagyobb, max. kb. base+0.25."""
     shortfall = max(0.0, 1 - games / 15)
     return min(0.6, base + 0.25 * shortfall)
+
+
+def blend_src(probs, src, w):
+    """Az 1X2 esélyeket egy másik forrás ({Home,Draw,Away}) felé húzza w súllyal."""
+    if not w or not src or any(src.get(k) is None for k in ("Home", "Draw", "Away")):
+        return probs
+    out = dict(probs)
+    for k in ("Home", "Draw", "Away"):
+        out[k] = (1 - w) * probs[k] + w * src[k]
+    s = out["Home"] + out["Draw"] + out["Away"]
+    for k in ("Home", "Draw", "Away"):
+        out[k] /= s
+    return out
 
 
 def blend_api(probs, api, wa):
@@ -494,7 +544,7 @@ DIVERGE_PP = 0.15  # ennyi (15 százalékpont) eltérésnél jelez az app
 _OUT_HU = {"Home": "Hazai", "Draw": "Döntetlen", "Away": "Vendég"}
 
 
-def opinions(lam, api, odds):
+def opinions(lam, api, odds, sharp=None, elo=None):
     """Három forrás 1X2 esélye: tiszta saját modell (a várható gólokból), az API-Football előrejelzése és a
     szorzókból számolt piaci esély. Visszaad: [{key,label,p_home,p_draw,p_away}], ami létezik.
     lam: (lam_h, lam_a) vagy None; api: {p_home,p_draw,p_away} vagy None; odds: {(market, sel): ár}."""
@@ -506,9 +556,12 @@ def opinions(lam, api, odds):
     if api and all(api.get(k) is not None for k in ("p_home", "p_draw", "p_away")):
         out.append({"key": "api", "label": "API-Football előrejelzés",
                     "p_home": api["p_home"], "p_draw": api["p_draw"], "p_away": api["p_away"]})
-    mk = market_probs(odds or {})
+    mk = consensus_probs(odds or {}, sharp)
     if all(k in mk for k in ("Home", "Draw", "Away")):
-        out.append({"key": "market", "label": "Piac (szorzókból)", "p_home": mk["Home"], "p_draw": mk["Draw"], "p_away": mk["Away"]})
+        out.append({"key": "market", "label": "Piac (Bet365 + éles iroda)" if sharp else "Piac (szorzókból)",
+                    "p_home": mk["Home"], "p_draw": mk["Draw"], "p_away": mk["Away"]})
+    if elo and all(k in elo for k in ("Home", "Draw", "Away")):
+        out.append({"key": "elo", "label": "Elo (saját számítás)", "p_home": elo["Home"], "p_draw": elo["Draw"], "p_away": elo["Away"]})
     return out
 
 
@@ -523,3 +576,47 @@ def divergence(ops, threshold=DIVERGE_PP):
         if spread >= threshold and (best is None or spread > best["spread"]):
             best = {"outcome": _OUT_HU[name], "spread": spread, "items": vals}
     return best
+
+
+# ---------------------------------------------------------------- saját Elo
+
+ELO_START = 1500.0
+ELO_K = 20.0
+ELO_HOME_ADV = 65.0
+
+
+def compute_elo(rows):
+    """rows: (home_id, away_id, hg, ag) időrendben. Visszaad: {team_id: {'elo': érték, 'n': meccsek száma}}.
+    A ligahatárokon átívelő erőt a közös ellenfelek (európai kupák, Nemzetek Ligája) kötik össze."""
+    r = {}
+    for hid, aid, hg, ag in rows:
+        h = r.setdefault(hid, {"elo": ELO_START, "n": 0})
+        a = r.setdefault(aid, {"elo": ELO_START, "n": 0})
+        exp_h = 1 / (1 + 10 ** (-(h["elo"] + ELO_HOME_ADV - a["elo"]) / 400))
+        score_h = 1.0 if hg > ag else 0.5 if hg == ag else 0.0
+        gd = abs(hg - ag)
+        mult = 1.0 if gd <= 1 else 1.5 if gd == 2 else (11 + gd) / 8
+        delta = ELO_K * mult * (score_h - exp_h)
+        h["elo"] += delta
+        a["elo"] -= delta
+        h["n"] += 1
+        a["n"] += 1
+    return r
+
+
+def elo_probs(elo_h, elo_a):
+    """Elo-különbségből 1X2 esély: a várt pontszámot a döntetlen esélyével osztja szét (kiegyenlített meccsen kb. 27%)."""
+    e = 1 / (1 + 10 ** (-(elo_h + ELO_HOME_ADV - elo_a) / 400))
+    d = max(0.10, 0.27 - 0.33 * abs(e - 0.5))
+    ph, pa = e - d / 2, 1 - e - d / 2
+    if ph < 0.01 or pa < 0.01:
+        ph, pa = max(ph, 0.01), max(pa, 0.01)
+        d = 1 - ph - pa
+    return {"Home": ph, "Draw": d, "Away": pa}
+
+
+def elo_weight(base, min_games):
+    """Az Elo súlya: alapból kicsi; kevés meccsű csapatnál nagyobb, de 5 meccs alatt még nincs benne érdemi információ."""
+    if min_games < 5:
+        return 0.0
+    return min(0.35, base + 0.15 * max(0.0, 1 - min_games / 15))

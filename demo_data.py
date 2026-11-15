@@ -43,7 +43,7 @@ def load():
         conn.execute("INSERT OR REPLACE INTO odds VALUES (?, 'BTTS', 'No', 1.95)", (fid,))
         conn.execute("INSERT OR REPLACE INTO odds VALUES (?, 'OU2.5', 'Over 2.5', 1.85)", (fid,))
         conn.execute("INSERT OR REPLACE INTO odds VALUES (?, 'OU2.5', 'Under 2.5', 1.95)", (fid,))
-    conn.execute("INSERT INTO injuries VALUES (9001, 4, 'Teszt Rovers', 'Kovács Péter', 'Missing Fixture', 'Térdsérülés')")
+    conn.execute("INSERT INTO injuries(fixture_id, team_id, team, player, type, reason) VALUES (9001, 4, 'Teszt Rovers', 'Kovács Péter', 'Missing Fixture', 'Térdsérülés')")
     conn.execute("INSERT OR REPLACE INTO h2h VALUES (9001, ?)", (json.dumps([
         {"date": "2026-03-01", "home": "Teszt Rovers", "away": "Demo FC", "hg": 0, "ag": 2, "league": "Premier League"},
         {"date": "2025-10-12", "home": "Demo FC", "away": "Teszt Rovers", "hg": 3, "ag": 1, "league": "Premier League"},

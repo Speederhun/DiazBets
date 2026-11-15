@@ -94,3 +94,8 @@ Az éjszakai `settle` a friss meccsek szögletstatisztikáját magától letölt
 - **Szorzómozgás:** `python collect.py odds` frissíti a szorzókat és eltárolja a változásokat (`odds_history`). A listán és a meccsoldalon nyíl jelzi az elmozdulást.
 - **Ligák szerint:** az Előzmények oldalon bajnokságonként és piaconként a találati arány és a profit.
 - **API-előrejelzés a vegyítésben:** az 1X2 esélybe az API-Football előrejelzése is beleszámít (alap súly 15%, kevés meccsű csapatnál akár ~40%). Kikapcsolás: `DIAZBETS_API_WEIGHT=0`.
+- **xG:** a modell a csapatok erejét az xG és a tényleges gól keverékéből (65% xG) számolja. A régi meccsek xG-jét a `collect.py stats N` tölti be (naponta futtasd, amíg a „még hátravan” 0 nem lesz).
+- **Hosszabb előzmény:** 730 napnyi eredmény, 100 napos felezési idővel. Betöltés: `collect.py backfill 730`.
+- **Kulcsjátékos-hiány:** az API góllövő- és gólpassz-listájából (hetente frissítve) számolja, mennyit ér a csapatnak a kiesett játékos (legfeljebb -15% a várható gólokból).
+- **Éles iroda:** `DIAZBETS_SHARP_BOOKMAKER` (alap: 4). A `collect.py bookmakers` kiírja az API fogadóirodáit, ellenőrizd az azonosítót. 0 = kikapcsolva. A piaci esélyben az éles iroda 65%-ot számít.
+- **Saját Elo:** a teljes adatbázis eredményeiből számolt Elo (`DIAZBETS_ELO_WEIGHT`, alap 0.10, kevés meccsű csapatnál nagyobb), a meccsoldalon 4. véleményként is látszik. Külső Elo-forrást (clubelo.com, eloratings.net) nem építettem be: nem hivatalos, a csapatnevek párosítása törékeny.

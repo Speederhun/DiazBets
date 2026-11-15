@@ -6,6 +6,7 @@ Használat:
     python collect.py stats [db]             # szögletstatisztika letöltése a lejátszott meccsekhez (Pro)
     python collect.py rebackfill [napok]     # új liga felvétele után az utolsó N nap újratöltése (alap: 150)
     python collect.py backfill [napok]       # múltbeli eredmények letöltése a modellhez (alap: 45 nap)
+    python collect.py bookmakers             # az API fogadóirodáinak listája (az éles iroda azonosítójának ellenőrzéséhez)
     python collect.py odds [YYYY-MM-DD]      # csak a szorzók frissítése (mozgáskövetés), tippek újraszámolása
 """
 import json
@@ -43,6 +44,7 @@ LEAGUES = [
 LEAGUE_ORDER = {lid: i for i, (lid, _) in enumerate(LEAGUES)}
 
 BOOKMAKER = 8  # Bet365
+SHARP_BOOKMAKER = int(os.environ.get("DIAZBETS_SHARP_BOOKMAKER", "4"))  # éles iroda (alapból 4, feltehetően Pinnacle; ellenőrzés: collect.py bookmakers). 0 = kikapcsolva
 PER_FIXTURE_LIMIT = 60 if PRO else 12   # meccsenkénti tartalék lekérések száma
 RESERVE = min(500 if PRO else 25, DAILY_BUDGET // 4)  # a visszatöltés/statisztika ennyi kérést mindig meghagy
 BET_IDS = {1: "1X2", 8: "BTTS", 5: "OU", 45: "CORNERS"}
@@ -97,7 +99,9 @@ def known_ids(conn):
     return {r[0] for r in conn.execute("SELECT id FROM fixtures")}
 
 
-def store_odds(conn, items):
+def store_odds(conn, items, table="odds"):
+    """table: 'odds' (fő iroda, változáskövetéssel) vagy 'odds_sharp' (éles iroda)."""
+    assert table in ("odds", "odds_sharp")
     ids = known_ids(conn)
     for it in items:
         fid = it["fixture"]["id"]
@@ -119,13 +123,14 @@ def store_odds(conn, items):
                     else:
                         market_name = market
                     price = float(v["odd"])
-                    old = conn.execute("SELECT price FROM odds WHERE fixture_id=? AND market=? AND selection=?",
-                                       (fid, market_name, sel)).fetchone()
-                    if old is None or abs(old["price"] - price) > 1e-9:
-                        conn.execute("INSERT INTO odds_history(fixture_id, market, selection, ts, price) VALUES (?,?,?,?,?)",
-                                     (fid, market_name, sel, time.time(), price))
+                    if table == "odds":
+                        old = conn.execute("SELECT price FROM odds WHERE fixture_id=? AND market=? AND selection=?",
+                                           (fid, market_name, sel)).fetchone()
+                        if old is None or abs(old["price"] - price) > 1e-9:
+                            conn.execute("INSERT INTO odds_history(fixture_id, market, selection, ts, price) VALUES (?,?,?,?,?)",
+                                         (fid, market_name, sel, time.time(), price))
                     conn.execute(
-                        "INSERT OR REPLACE INTO odds(fixture_id, market, selection, price) VALUES (?,?,?,?)",
+                        f"INSERT OR REPLACE INTO {table}(fixture_id, market, selection, price) VALUES (?,?,?,?)",
                         (fid, market_name, sel, price),
                     )
     conn.commit()
@@ -142,9 +147,9 @@ def store_injuries(conn, items):
             conn.execute("DELETE FROM injuries WHERE fixture_id = ?", (fid,))
             seen.add(fid)
         conn.execute(
-            "INSERT INTO injuries(fixture_id, team_id, team, player, type, reason) VALUES (?,?,?,?,?,?)",
+            "INSERT INTO injuries(fixture_id, team_id, team, player, type, reason, player_id) VALUES (?,?,?,?,?,?,?)",
             (fid, it["team"]["id"], it["team"]["name"], it["player"]["name"],
-             it["player"].get("type"), it["player"].get("reason")),
+             it["player"].get("type"), it["player"].get("reason"), it["player"].get("id")),
         )
     conn.commit()
 
@@ -174,28 +179,40 @@ def fetch_paged(client, path, max_pages=8, paged=True, **params):
         page += 1
 
 
+def _num(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def store_stats(conn, fixture_id, items):
-    """Szögletek tárolása. Üres válasznál 0-s csapatazonosítóval jelöljük, hogy ne kérjük újra."""
+    """Szögletek és xG tárolása. Üres válasznál 0-s csapatazonosítóval jelöljük, hogy ne kérjük újra."""
+    conn.execute("DELETE FROM fixture_stats WHERE fixture_id = ?", (fixture_id,))
     n = 0
     for it in items:
-        corners = None
+        corners = xg = None
         for st in it.get("statistics", []):
             if st.get("type") == "Corner Kicks":
                 corners = st.get("value")
-                break
-        conn.execute("INSERT OR REPLACE INTO fixture_stats(fixture_id, team_id, corners) VALUES (?,?,?)",
-                     (fixture_id, it["team"]["id"], int(corners) if corners is not None else None))
+            elif st.get("type") == "expected_goals":
+                xg = _num(st.get("value"))
+        conn.execute("INSERT OR REPLACE INTO fixture_stats(fixture_id, team_id, corners, xg, v2) VALUES (?,?,?,?,1)",
+                     (fixture_id, it["team"]["id"], int(corners) if corners is not None else None, xg))
         n += 1
     if n == 0:
-        conn.execute("INSERT OR REPLACE INTO fixture_stats(fixture_id, team_id, corners) VALUES (?,0,NULL)", (fixture_id,))
+        conn.execute("INSERT OR REPLACE INTO fixture_stats(fixture_id, team_id, corners, xg, v2) VALUES (?,0,NULL,NULL,1)", (fixture_id,))
     conn.commit()
 
 
+# még nincs statisztikája, vagy az xG előtti verzióval lett letöltve (akkor újra kell kérni az xG-ért)
+NEEDS_STATS = """status = 'FT' AND (
+    NOT EXISTS (SELECT 1 FROM fixture_stats s WHERE s.fixture_id = f.id)
+    OR EXISTS (SELECT 1 FROM fixture_stats s WHERE s.fixture_id = f.id AND COALESCE(s.v2, 0) = 0))"""
+
+
 def collect_stats(conn, client, limit=500):
-    rows = conn.execute(
-        """SELECT id FROM fixtures f WHERE status = 'FT'
-             AND NOT EXISTS (SELECT 1 FROM fixture_stats s WHERE s.fixture_id = f.id)
-           ORDER BY kickoff DESC LIMIT ?""", (limit,)).fetchall()
+    rows = conn.execute(f"SELECT id FROM fixtures f WHERE {NEEDS_STATS} ORDER BY kickoff DESC LIMIT ?", (limit,)).fetchall()
     done = 0
     for r in rows:
         if used_today(conn) >= DAILY_BUDGET - RESERVE:
@@ -204,9 +221,8 @@ def collect_stats(conn, client, limit=500):
         d = client.get("fixtures/statistics", fixture=r["id"])
         store_stats(conn, r["id"], d.get("response", []))
         done += 1
-    left = conn.execute("""SELECT COUNT(*) FROM fixtures f WHERE status = 'FT'
-        AND NOT EXISTS (SELECT 1 FROM fixture_stats s WHERE s.fixture_id = f.id)""").fetchone()[0]
-    log(f"szögletstatisztika: {done} meccs letöltve, {left} még hátravan")
+    left = conn.execute(f"SELECT COUNT(*) FROM fixtures f WHERE {NEEDS_STATS}").fetchone()[0]
+    log(f"szöglet- és xG-statisztika: {done} meccs letöltve, {left} még hátravan")
 
 
 def stats_cmd(limit=500):
@@ -305,8 +321,10 @@ def collect(day=None):
                 break  # ha az első is elutasítva, a többit se kérjük
 
         if PRO:
+            _safe("éles szorzók", lambda: fetch_sharp_odds(conn, client, day))
             _safe("API-előrejelzések", lambda: fetch_predictions(conn, client, ordered[:PER_FIXTURE_LIMIT]))
             _safe("tabellák", lambda: fetch_standings(conn, client, ordered, day))
+            _safe("kulcsjátékosok", lambda: fetch_key_players(conn, client, ordered, day))
     except BudgetExceeded:
         log("Elfogyott a napi kéréskeret, a maradék kimarad.")
     except ApiError as e:
@@ -382,6 +400,80 @@ def fetch_standings(conn, client, fixtures, day):
     log(f"  {n} tabella frissítve")
 
 
+def fetch_sharp_odds(conn, client, day):
+    if not (PRO and SHARP_BOOKMAKER):
+        return
+    items = fetch_paged(client, "odds", date=day, bookmaker=SHARP_BOOKMAKER)
+    store_odds(conn, items, table="odds_sharp")
+    log(f"  éles iroda ({SHARP_BOOKMAKER}) szorzója {len(items)} meccshez")
+
+
+def fetch_key_players(conn, client, fixtures, day):
+    """Ligánként a legjobb góllövők és gólpassz-adók (hetente frissítve): ebből tudjuk, mennyit ér a kiesett játékos."""
+    n = 0
+    seen = set()
+    for f in fixtures:
+        key = (f["league_id"], f["season"])
+        if key in seen or not f["season"]:
+            continue
+        seen.add(key)
+        last = conn.execute("SELECT MAX(fetched_day) AS d FROM key_players WHERE league_id=? AND season=?", key).fetchone()["d"]
+        if last and (datetime.strptime(day, "%Y-%m-%d") - datetime.strptime(last, "%Y-%m-%d")).days < 7:
+            continue
+        players = {}
+        for path, field in (("players/topscorers", "goals"), ("players/topassists", "assists")):
+            for it in client.get(path, league=key[0], season=key[1]).get("response", []) or []:
+                st = (it.get("statistics") or [{}])[0]
+                g = st.get("goals") or {}
+                p = players.setdefault(it["player"]["id"], {"name": it["player"].get("name"),
+                                                            "team_id": (st.get("team") or {}).get("id"), "goals": 0, "assists": 0})
+                p["goals"] = max(p["goals"], g.get("total") or 0)
+                p["assists"] = max(p["assists"], g.get("assists") or 0)
+        if players:
+            conn.execute("DELETE FROM key_players WHERE league_id=? AND season=?", key)
+            for pid, p in players.items():
+                conn.execute("INSERT INTO key_players(league_id, season, player_id, team_id, name, goals, assists, fetched_day) VALUES (?,?,?,?,?,?,?,?)",
+                             (key[0], key[1], pid, p["team_id"], p["name"], p["goals"], p["assists"], day))
+            conn.commit()
+            n += 1
+    log(f"  {n} liga kulcsjátékos-listája frissítve")
+
+
+def key_missing(conn, fixture, team_id, team_goals):
+    """A hiányzó kulcsjátékosok: [(név, részesedés a csapat góljaiból+gólpasszaiból, súly)]."""
+    if not team_goals:
+        return []
+    out = []
+    rows = conn.execute(
+        """SELECT i.player, i.type, k.goals, k.assists FROM injuries i
+           JOIN key_players k ON k.player_id = i.player_id AND k.league_id = ? AND k.season = ?
+           WHERE i.fixture_id = ? AND i.team_id = ?""", (fixture["league_id"], fixture["season"], fixture["id"], team_id)).fetchall()
+    for r in rows:
+        share = min(1.0, ((r["goals"] or 0) + 0.5 * (r["assists"] or 0)) / team_goals)
+        wt = 1.0 if (r["type"] or "").startswith("Missing") else 0.5
+        out.append((r["player"], share, wt))
+    return out
+
+
+def team_goals_map(conn, league_id, season):
+    """{team_id: eddig lőtt gólok} az API tabellájából."""
+    row = conn.execute("SELECT json FROM standings WHERE league_id=? AND season=?", (league_id, season)).fetchone()
+    if not row:
+        return {}
+    return {r["team_id"]: r["gf"] for r in json.loads(row["json"]) if r.get("gf")}
+
+
+def bookmakers_cmd():
+    init_db()
+    conn = connect()
+    client = Client(conn)
+    try:
+        for b in client.get("odds/bookmakers").get("response", []):
+            print(b.get("id"), b.get("name"))
+    finally:
+        conn.close()
+
+
 def refresh_odds(day=None):
     """Csak a szorzókat frissíti (a mozgás követéséhez), majd újraszámolja a még le nem zárt tippeket. Sérülteket/H2H-t nem kér."""
     init_db()
@@ -397,6 +489,7 @@ def refresh_odds(day=None):
         store_odds(conn, items)
         changed = conn.execute("SELECT COUNT(*) FROM odds_history WHERE ts > ?", (time.time() - 300,)).fetchone()[0]
         log(f"  szorzó frissítve {len(items)} meccshez, {changed} változás")
+        _safe("éles szorzók", lambda: fetch_sharp_odds(conn, client, day))
     except BudgetExceeded:
         log("Elfogyott a napi kéréskeret.")
     except ApiError as e:
@@ -471,8 +564,23 @@ def load_calibration(conn):
     return model.fit_calibration((r["market"], r["p"], r["y"]) for r in rows)
 
 
+def load_sharp(conn, fixture_id):
+    rows = conn.execute("SELECT market, selection, price FROM odds_sharp WHERE fixture_id = ?", (fixture_id,))
+    return {(r["market"], r["selection"]): r["price"] for r in rows}
+
+
+def load_elo(conn, day):
+    rows = conn.execute(
+        """SELECT home_id, away_id, home_goals, away_goals FROM fixtures
+           WHERE status IN ('FT','AET','PEN') AND home_goals IS NOT NULL AND away_goals IS NOT NULL AND day <= ?
+           ORDER BY kickoff""", (day,)).fetchall()
+    return model.compute_elo((r["home_id"], r["away_id"], r["home_goals"], r["away_goals"]) for r in rows)
+
+
 def generate_tips(conn, day):
     teams, avg_h, avg_a = model.load_results_table(conn, day)
+    elo = load_elo(conn, day)
+    elo_base = float(os.environ.get("DIAZBETS_ELO_WEIGHT", "0.10"))  # 0 = az Elo nem számít bele
     cal = load_calibration(conn) if os.environ.get("DIAZBETS_CALIBRATE", "1") != "0" else {}
     adjust = os.environ.get("DIAZBETS_ADJUST", "1") != "0"
     api_base = float(os.environ.get("DIAZBETS_API_WEIGHT", "0.15"))  # 0 = az API előrejelzése nem számít bele
@@ -499,16 +607,30 @@ def generate_tips(conn, day):
                     extra.append(f"Pihenőnapok: {f['home']} {rh if rh is not None else '?'}, {f['away']} {ra if ra is not None else '?'}.")
                 if adj["inj_h"] > 1 or adj["inj_a"] > 1:
                     extra.append(f"Hiányzók: {f['home']} {adj['inj_h']}, {f['away']} {adj['inj_a']}.")
+                tg = team_goals_map(conn, f["league_id"], f["season"])
+                for side, tid, name in (("h", f["home_id"], f["home"]), ("a", f["away_id"], f["away"])):
+                    km = key_missing(conn, f, tid, tg.get(tid))
+                    adj["key_" + side] = model.key_loss([(s, w) for _, s, w in km])
+                    for pname, share, _wt in km:
+                        if share >= 0.10:
+                            extra.append(f"Kulcsjátékos hiányzik: {pname} ({name}, a csapat góljainak/gólpasszainak kb. {share:.0%}-a).")
             xg = model.expected_goals(teams, avg_h, avg_a, f["home_id"], f["away_id"], adj)
         if xg:
             w = model.adaptive_weight(weight, model.min_games(teams, f["home_id"], f["away_id"]))
-            probs = model.blend(model.probabilities(*xg), odds, w)
+            sharp = load_sharp(conn, f["id"])
+            probs = model.blend(model.probabilities(*xg), odds, w, mk=model.consensus_probs(odds, sharp))
             api = conn.execute("SELECT * FROM api_predictions WHERE fixture_id=?", (f["id"],)).fetchone()
             wa = 0.0
             if api and api_base > 0:
                 games = model.min_games(teams, f["home_id"], f["away_id"])
                 wa = model.api_weight(api_base, games)
                 probs = model.blend_api(probs, api, wa)
+            we = 0.0
+            eh, ea = elo.get(f["home_id"]), elo.get(f["away_id"])
+            if eh and ea and elo_base > 0:
+                we = model.elo_weight(elo_base, min(eh["n"], ea["n"]))
+                if we:
+                    probs = model.blend_src(probs, model.elo_probs(eh["elo"], ea["elo"]), we)
             new_tips = model.build_tips(probs, odds, *xg)
             conn.execute("INSERT OR REPLACE INTO predictions(fixture_id, p_home, p_draw, p_away, lam_h, lam_a) VALUES (?,?,?,?,?,?)",
                          (f["id"], probs["Home"], probs["Draw"], probs["Away"], xg[0], xg[1]))
@@ -519,10 +641,14 @@ def generate_tips(conn, day):
                 for t in new_tips:
                     if t["market"] == "1X2":
                         t["note"] += f" Az 1X2 esélyben az API-Football előrejelzése is benne van ({wa:.0%} súllyal)."
+            if we:
+                for t in new_tips:
+                    if t["market"] == "1X2":
+                        t["note"] += f" Elo-érték is beleszámít ({we:.0%} súllyal)."
         else:
             # Kevés saját adat: szorzó alapú tartalék tipp (ha van szorzó)
             new_tips = model.tips_from_odds(odds)
-            mk = model.market_probs(odds)
+            mk = model.consensus_probs(odds, load_sharp(conn, f["id"]))
             if all(k in mk for k in ("Home", "Draw", "Away")):
                 conn.execute("INSERT OR REPLACE INTO predictions(fixture_id, p_home, p_draw, p_away, lam_h, lam_a) VALUES (?,?,?,?,NULL,NULL)",
                              (f["id"], mk["Home"], mk["Draw"], mk["Away"]))
@@ -628,6 +754,8 @@ if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "collect":
         collect(sys.argv[2] if len(sys.argv) > 2 else None)
+    elif cmd == "bookmakers":
+        bookmakers_cmd()
     elif cmd == "odds":
         refresh_odds(sys.argv[2] if len(sys.argv) > 2 else None)
     elif cmd == "settle":
