@@ -148,6 +148,8 @@ def test_judge_corners():
     assert collect.judge_corners("Over 9.5", 12) == "win"
     assert collect.judge_corners("Over 9.5", 9) == "loss"
     assert collect.judge_corners("Under 9.5", 9) == "win"
+    assert collect.judge_corners("Under 9.0", 9) == "void"
+    assert collect.judge_corners("Over 9.0", 10) == "win"
 
 
 def test_blend_moves_toward_market():
@@ -200,3 +202,12 @@ def test_adaptive_weight():
     assert model.adaptive_weight(0.5, 40) == 0.5
     assert model.adaptive_weight(0.5, 3) > 0.85
     assert model.adaptive_weight(0.5, 0) == 1.0
+
+
+def test_corner_tip_blend_and_integer_line():
+    odds = {("CORNERS", "Over 9.0"): 1.9, ("CORNERS", "Under 9.0"): 1.9}
+    solo = model.corner_tip(7.0, odds, 0)
+    mixed = model.corner_tip(7.0, odds, 0.8)
+    assert solo["pick"].startswith("Under 9.0") and mixed["pick"].startswith("Under 9.0")
+    assert mixed["prob"] < solo["prob"]          # a piac (≈50%) lehúzza a túlzott magabiztosságot
+    assert 0.5 <= mixed["prob"] <= 1

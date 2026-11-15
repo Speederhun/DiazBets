@@ -364,7 +364,11 @@ def generate_tips(conn, day):
             new_tips = model.tips_from_odds(odds)
         cx = model.expected_corners(c_teams, c_avg_h, c_avg_a, f["home_id"], f["away_id"]) if c_avg_h else None
         if cx:
-            new_tips.append(model.corner_tip(cx[0] + cx[1], odds))
+            wc = model.adaptive_weight(weight, model.min_corner_games(c_teams, f["home_id"], f["away_id"]))
+            tip = model.corner_tip(cx[0] + cx[1], odds, wc)
+            if wc and odds:
+                tip["note"] += f" Piaci súly: {wc:.0%}."
+            new_tips.append(tip)
         for t in new_tips:
             conn.execute(
                 """INSERT INTO tips(fixture_id, market, pick, prob, odds, value, note)
@@ -397,8 +401,10 @@ def judge(market, pick, hg, ag):
 
 def judge_corners(pick, total):
     side, line = pick.split()
-    over = total > float(line)
-    return "win" if (side == "Over") == over else "loss"
+    line = float(line)
+    if total == line:
+        return "void"  # kerek vonalnál a pontos találat visszajáró tét
+    return "win" if (side == "Over") == (total > line) else "loss"
 
 
 def settle_local(conn):

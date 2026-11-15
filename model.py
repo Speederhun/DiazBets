@@ -210,9 +210,9 @@ def poisson_cdf(k, lam):
     return sum(_pois(i, lam) for i in range(0, int(k) + 1))
 
 
-def corner_tip(lam_total, odds):
+def corner_tip(lam_total, odds, w=0.0):
     """A rendelkezésre álló szögletvonalak közül a várható értékhez legközelebbit választja.
-    Visszaad egy tippet vagy None-t."""
+    w: a piaci esély súlya (0..1). Kerek vonalnál a visszajáró tét (pontosan a vonal) kiesik a számításból."""
     lines = {}
     for (market, sel), price in odds.items():
         if market != "CORNERS":
@@ -228,11 +228,22 @@ def corner_tip(lam_total, odds):
         line = min(full, key=lambda x: abs(x - lam_total))
     else:
         line = int(lam_total) + 0.5
-    p_over = 1 - poisson_cdf(line, lam_total)
+    if line == int(line):
+        p_under = poisson_cdf(line - 1, lam_total)
+        p_over = 1 - poisson_cdf(line, lam_total)
+        p_over = p_over / (p_over + p_under)
+    else:
+        p_over = 1 - poisson_cdf(line, lam_total)
+    sides = lines.get(line, {})
+    if w and "Over" in sides and "Under" in sides:
+        inv_o, inv_u = 1 / sides["Over"], 1 / sides["Under"]
+        p_over = (1 - w) * p_over + w * inv_o / (inv_o + inv_u)
     side, p = ("Over", p_over) if p_over >= 0.5 else ("Under", 1 - p_over)
-    price = lines.get(line, {}).get(side)
-    note = f"Várható szögletek: {lam_total:.1f} (vonal: {line})."
-    return _tip("CORNERS", f"{side} {line}", p, price, note)
+    price = sides.get(side)
+    note = f"Várható szögletek: {lam_total:.1f} (vonal: {line:g})."
+    if line == int(line):
+        note += " Pontosan a vonalnyi szögletnél a tét visszajár."
+    return _tip("CORNERS", f"{side} {line:g}" if line != int(line) else f"{side} {line:.1f}", p, price, note)
 
 
 # ---------------------------------------------------------------- vegyítés a piaccal
@@ -279,6 +290,13 @@ def adaptive_weight(base, games):
     """Kevés meccses csapatoknál a piac súlya nő: 15 meccsnél már az alap, 0-nál 1 felé tart."""
     shortfall = max(0.0, 1 - games / 15)
     return base + (1 - base) * shortfall
+
+
+def min_corner_games(teams, home_id, away_id):
+    def g(tid):
+        t = teams.get(tid)
+        return (t["hp"] + t["ap"]) if t else 0
+    return min(g(home_id), g(away_id))
 
 
 def min_games(teams, home_id, away_id):
