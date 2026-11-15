@@ -405,7 +405,7 @@ def test_opinions_divergence():
                          {("1X2", "Home"): 1.6, ("1X2", "Draw"): 4.0, ("1X2", "Away"): 5.5})
     assert [o["key"] for o in ops] == ["model", "api", "market"]
     dv = model.divergence(ops)
-    assert dv and dv["outcome"] in ("Hazai", "Vendég") and dv["spread"] >= 0.15
+    assert dv and dv["outcome"] in ("Hazai", "Vendég") and dv["spread"] >= 0.25
     agree = model.opinions(None, {"p_home": 0.5, "p_draw": 0.25, "p_away": 0.25},
                            {("1X2", "Home"): 2.0, ("1X2", "Draw"): 4.0, ("1X2", "Away"): 4.0})
     assert model.divergence(agree) is None

@@ -540,7 +540,7 @@ def apply_calibration(cal, market, p):
 
 # ---------------------------------------------------------------- vélemények összevetése
 
-DIVERGE_PP = 0.15  # ennyi (15 százalékpont) eltérésnél jelez az app
+DIVERGE_PP = 0.25  # ennyi (25 százalékpont) eltérésnél jelez az app
 _OUT_HU = {"Home": "Hazai", "Draw": "Döntetlen", "Away": "Vendég"}
 
 
