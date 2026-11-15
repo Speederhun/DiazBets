@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% from "_macros.html" import pbar %}
 {% block page %}index{% endblock %}
 {% block content %}
 <div class="daynav">
@@ -7,36 +6,30 @@
   <strong>{{ day }}</strong>
   <a href="{{ url_for('index', d=next_day) }}">→</a>
 </div>
+{% if groups %}
+<div class="toolbar" id="toolbar">
+  <div class="seg" role="group" aria-label="Szűrő">
+    <button type="button" data-filter="all" class="on">Mind</button>
+    <button type="button" data-filter="live">Élő</button>
+    <button type="button" data-filter="value">Értékes tipp</button>
+  </div>
+  <div class="seg">
+    <button type="button" id="collapse-all">Mind becsuk</button>
+    <button type="button" id="expand-all">Mind kinyit</button>
+  </div>
+</div>
+{% endif %}
 {% for (lid, lname, country), fixtures in groups.items() %}
-  <h2>{{ lname }}{% if country %} · {{ country }}{% endif %}</h2>
-  {% for f in fixtures %}
-  <div class="card match-card" data-fid="{{ f.id }}"><a class="row" href="{{ url_for('match', fid=f.id) }}">
-    <div class="mtime"><span class="kick">{{ f.kickoff|hhmm }}</span><span class="live-badge" hidden></span></div>
-    <div class="mrow">
-      <div class="mteam home"><span>{{ f.home }}</span>{% if f.home_logo %}<img class="logo" src="{{ f.home_logo }}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">{% endif %}</div>
-      <div class="mscore" data-score>{% if f.home_goals is not none and f.status not in ('NS','TBD') %}{{ f.home_goals }} : {{ f.away_goals }}{% else %}–{% endif %}</div>
-      <div class="mteam away">{% if f.away_logo %}<img class="logo" src="{{ f.away_logo }}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">{% endif %}<span>{{ f.away }}</span></div>
-    </div>
-    {% set pr = preds.get(f.id) %}
-    {% if pr %}<div class="pbar-wrap" data-pred="1">{{ pbar(pr, 'compact') }}</div>{% endif %}
-    {% set o = odds.get(f.id) %}
-    {% if o %}<div class="odds-line"><span class="od"><i>1</i><b>{{ o.get('Home','–') }}</b></span><span class="od"><i>X</i><b>{{ o.get('Draw','–') }}</b></span><span class="od"><i>2</i><b>{{ o.get('Away','–') }}</b></span></div>{% endif %}
-    {% set ts = tips.get(f.id) %}
-    {% set dv = diverge.get(f.id) %}
-    {% if ts %}
-    <div class="meta">
-      {% if dv %}<span class="chip diverge-chip" title="Nagy eltérés ({{ dv.outcome }}): {% for name, v in dv['items'] %}{{ name }} {{ (v * 100)|round|int }}%{{ ', ' if not loop.last }}{% endfor %}">⚠ Eltérő vélemények</span>{% endif %}
-      {% for m, t in ts.items() %}
-      <span class="chip {{ 'value' if t.value and t.value > 0 }}" data-market="{{ m }}">{{ MARKET_LABELS[m] }}: <b>{{ t.pick|pick_hu }}</b> {{ t.prob|pct }}
-        {% set mv = tip_moves.get((f.id, m)) %}{% if mv %}<span class="mv {{ 'dn' if mv.pct < 0 else 'up' }}" title="Szorzó: nyitó {{ '%.2f'|format(mv.open) }} → most {{ '%.2f'|format(mv.now) }}">{{ '▼' if mv.pct < 0 else '▲' }} {{ '%.2f'|format(mv.now) }}</span>{% endif %}
-        {% if t.result %}<span class="{{ t.result }}">· {{ RESULT_LABELS[t.result] }}</span>{% endif %}</span>
-      {% endfor %}
-    </div>
-    {% endif %}
-  </a></div>
-  {% endfor %}
+<details class="league" open data-lid="{{ lid }}">
+  <summary><span class="lg-name">{{ lname }}{% if country %} · {{ country }}{% endif %}</span>
+    <span class="lg-count">{{ fixtures|length }} meccs</span><span class="lg-live" hidden></span></summary>
+  <div class="cards">
+  {% for f in fixtures %}{% include "_card.html" %}{% endfor %}
+  </div>
+</details>
 {% else %}
   <p class="note">Erre a napra nincs meccs az adatbázisban. A gyűjtés reggel fut le.</p>
 {% endfor %}
+<p class="empty-filter note" hidden>Nincs a szűrőnek megfelelő meccs.</p>
 <p class="note">API-kérések ma: {{ api_used }} (napi keret: {{ api_budget }})</p>
 {% endblock %}

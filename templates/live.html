@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Élő · DiazBets{% endblock %}
+{% block page %}index{% endblock %}
+{% block content %}
+<h2>Élő és közelgő meccsek</h2>
+<p class="note">A most zajló, a ~80 percen belül kezdődő és a legfeljebb 4 órája kezdődött meccsek, ligától függetlenül. Az állás magától frissül.</p>
+<div class="cards live-grid">
+{% set show_league = true %}
+{% for f in fixtures %}{% include "_card.html" %}
+{% else %}
+  <p class="note">Most nincs élő és hamarosan induló meccs.</p>
+{% endfor %}
+</div>
+<p class="note">API-kérések ma: {{ api_used }} (napi keret: {{ api_budget }})</p>
+{% endblock %}

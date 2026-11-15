@@ -587,3 +587,28 @@ def test_friendlies_feed_the_model_but_are_hidden():
     c.post("/login", data={"username": "teszt", "password": "jelszo1234"})
     page = c.get("/?d=2026-11-15").get_data(as_text=True)
     assert "Cland" not in page and "Friendlies" not in page  # a listán nem látszik
+
+
+def test_list_layout_collapsible_leagues_and_live_page():
+    from datetime import datetime, timedelta, timezone
+    from db import connect
+    conn = connect()
+    ko = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat()
+    conn.execute("""INSERT OR REPLACE INTO fixtures(id, day, kickoff, league_id, league_name, country, season, home_id, home, away_id, away, status, home_goals, away_goals)
+                    VALUES (6600,?,?,140,'La Liga','Spain',2026,66001,'Livehaz',66002,'Livevend','1H',1,0)""",
+                 (datetime.now(timezone.utc).strftime("%Y-%m-%d"), ko))
+    conn.commit()
+    conn.close()
+    from app import app
+    c = app.test_client()
+    c.post("/login", data={"username": "teszt", "password": "jelszo1234"})
+    page = c.get("/").get_data(as_text=True)
+    assert 'class="league"' in page or "league" in page
+    assert "details" in page and 'id="toolbar"' in page and 'data-filter="value"' in page
+    assert 'id="nav-live"' in page and "layout.js" in page
+    live_page = c.get("/live")
+    assert live_page.status_code == 200
+    body = live_page.get_data(as_text=True)
+    assert "Livehaz" in body and "La Liga" in body            # a most zajló meccs ligájával együtt
+    assert "Élő és közelgő meccsek" in body
+    assert c.get("/static/layout.js").status_code == 200

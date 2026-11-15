@@ -99,3 +99,8 @@ Az éjszakai `settle` a friss meccsek szögletstatisztikáját magától letölt
 - **Kulcsjátékos-hiány:** az API góllövő- és gólpassz-listájából (hetente frissítve) számolja, mennyit ér a csapatnak a kiesett játékos (legfeljebb -15% a várható gólokból).
 - **Éles iroda:** `DIAZBETS_SHARP_BOOKMAKER` (alap: 4). A `collect.py bookmakers` kiírja az API fogadóirodáit, ellenőrizd az azonosítót. 0 = kikapcsolva. A piaci esélyben az éles iroda 65%-ot számít.
 - **Saját Elo:** a teljes adatbázis eredményeiből számolt Elo (`DIAZBETS_ELO_WEIGHT`, alap 0.10, kevés meccsű csapatnál nagyobb), a meccsoldalon 4. véleményként is látszik. Külső Elo-forrást (clubelo.com, eloratings.net) nem építettem be: nem hivatalos, a csapatnevek párosítása törékeny.
+
+## Lista és élő nézet
+
+- A Meccsek oldalon a ligák lenyithatók (a választás megmarad), a kártyák széles képernyőn 2–3 oszlopban állnak, a fejlécben az Élő jelvény a most zajló meccsek számát mutatja. A szűrő: Mind / Élő / Értékes tipp.
+- `/live`: az élő és hamarosan induló meccsek egy rácsban, ligától függetlenül; a zajló meccsek elöl.

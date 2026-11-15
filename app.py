@@ -134,32 +134,22 @@ def logout():
     return redirect(url_for("login"))
 
 
-@app.route("/")
-@login_required
-def index():
-    day = request.args.get("d") or datetime.now(TZ).strftime("%Y-%m-%d")
-    try:
-        datetime.strptime(day, "%Y-%m-%d")
-    except ValueError:
-        abort(400)
-    conn = connect()
-    fixtures = conn.execute(f"SELECT * FROM fixtures WHERE day = ? AND league_id NOT IN ({HIDDEN_SQL}) ORDER BY league_id, kickoff", (day,)).fetchall()
+def _cards_context(conn, fixtures):
+    """Minden adat, ami a meccskártyákhoz kell (tippek, szorzók, esélysáv, eltérés-jelzés, szorzómozgás)."""
+    ids = [f["id"] for f in fixtures]
+    q = ",".join("?" * len(ids)) or "NULL"
     tips = {}
-    for t in conn.execute("SELECT t.* FROM tips t JOIN fixtures f ON f.id = t.fixture_id WHERE f.day = ?", (day,)):
+    for t in conn.execute(f"SELECT * FROM tips WHERE fixture_id IN ({q})", ids):
         tips.setdefault(t["fixture_id"], {})[t["market"]] = t
     odds = {}
-    for o in conn.execute("""SELECT o.* FROM odds o JOIN fixtures f ON f.id = o.fixture_id
-                             WHERE f.day = ? AND o.market = '1X2'""", (day,)):
+    for o in conn.execute(f"SELECT * FROM odds WHERE market = '1X2' AND fixture_id IN ({q})", ids):
         odds.setdefault(o["fixture_id"], {})[o["selection"]] = o["price"]
-    preds = {r["fixture_id"]: r for r in conn.execute(
-        "SELECT p.* FROM predictions p JOIN fixtures f ON f.id = p.fixture_id WHERE f.day = ?", (day,))}
-    used = conn.execute("SELECT count FROM api_usage ORDER BY day DESC LIMIT 1").fetchone()
-    moves = odds_moves(conn, [f["id"] for f in fixtures])
-    api_preds = {r["fixture_id"]: r for r in conn.execute(
-        "SELECT a.* FROM api_predictions a JOIN fixtures f ON f.id = a.fixture_id WHERE f.day = ?", (day,))}
-    sharp = _sharp_for(conn, [f["id"] for f in fixtures])
+    preds = {r["fixture_id"]: r for r in conn.execute(f"SELECT * FROM predictions WHERE fixture_id IN ({q})", ids)}
+    api_preds = {r["fixture_id"]: r for r in conn.execute(f"SELECT * FROM api_predictions WHERE fixture_id IN ({q})", ids)}
+    moves = odds_moves(conn, ids)
+    sharp = _sharp_for(conn, ids)
+    day = max((f["day"] for f in fixtures), default=datetime.now(TZ).strftime("%Y-%m-%d"))
     elo = collect.load_elo(conn, day)
-    conn.close()
     diverge = {}
     for f in fixtures:
         fid = f["id"]
@@ -177,11 +167,44 @@ def index():
             mv = moves.get(fid, {}).get((mk, t["pick"]))
             if mv and abs(mv["pct"]) >= 4:
                 tip_moves[(fid, mk)] = mv
+    return {"tips": tips, "odds": odds, "preds": preds, "diverge": diverge, "tip_moves": tip_moves}
+
+
+@app.route("/")
+@login_required
+def index():
+    day = request.args.get("d") or datetime.now(TZ).strftime("%Y-%m-%d")
+    try:
+        datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        abort(400)
+    conn = connect()
+    fixtures = conn.execute(f"SELECT * FROM fixtures WHERE day = ? AND league_id NOT IN ({HIDDEN_SQL}) ORDER BY league_id, kickoff", (day,)).fetchall()
+    ctx = _cards_context(conn, fixtures)
+    used = conn.execute("SELECT count FROM api_usage ORDER BY day DESC LIMIT 1").fetchone()
+    conn.close()
     groups = {}
     for f in fixtures:
         groups.setdefault((f["league_id"], f["league_name"], f["country"]), []).append(f)
-    return render_template("index.html", day=day, groups=groups, tips=tips, odds=odds, preds=preds, tip_moves=tip_moves, diverge=diverge,
+    return render_template("index.html", day=day, groups=groups, **ctx,
                            prev_day=_shift(day, -1), next_day=_shift(day, 1), api_used=used["count"] if used else 0, api_budget=DAILY_BUDGET)
+
+
+@app.route("/live")
+@login_required
+def live_page():
+    """Az élő nézet: a most zajló, a hamarosan kezdődő és a nemrég véget ért meccsek egy rácsban, ligától függetlenül."""
+    from datetime import timedelta, timezone
+    now = datetime.now(timezone.utc)
+    since = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    conn = connect()
+    rows = conn.execute(f"SELECT * FROM fixtures WHERE day >= ? AND league_id NOT IN ({HIDDEN_SQL}) ORDER BY kickoff", (since,)).fetchall()
+    fixtures = [f for f in rows if live.in_window(f, now)]
+    fixtures.sort(key=lambda f: (f["status"] not in live.LIVE_STATUSES, f["kickoff"]))  # a most zajló meccsek előre
+    ctx = _cards_context(conn, fixtures)
+    used = conn.execute("SELECT count FROM api_usage ORDER BY day DESC LIMIT 1").fetchone()
+    conn.close()
+    return render_template("live.html", fixtures=fixtures, **ctx, api_used=used["count"] if used else 0, api_budget=DAILY_BUDGET)
 
 
 def _sharp_for(conn, fixture_ids):

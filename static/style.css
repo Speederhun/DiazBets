@@ -250,3 +250,30 @@ details.tbl table{margin-top:6px}
 .standings tr.me td{background:rgba(57,135,229,.14);font-weight:600}
 
 .h2-sub{font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--mut);margin-left:6px}
+
+/* ---------- lista: ligák lenyitása, rács, szűrő ---------- */
+[hidden]{display:none!important}
+body[data-page="index"] main{max-width:1400px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,440px),1fr));gap:12px;margin-bottom:6px}
+.cards .match-card{margin:0}
+details.league{margin:18px 0 8px}
+details.league>summary{display:flex;align-items:center;gap:10px;cursor:pointer;list-style:none;padding:6px 2px;
+  font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);user-select:none}
+details.league>summary::-webkit-details-marker{display:none}
+details.league>summary::before{content:"▾";font-size:12px;transition:transform .15s}
+details.league:not([open])>summary::before{transform:rotate(-90deg)}
+details.league>summary:hover{color:var(--txt)}
+.lg-count{font-weight:400;font-size:12px;letter-spacing:0;text-transform:none}
+.lg-live{font-size:12px;letter-spacing:0;text-transform:none;color:#ff7b72;font-weight:700}
+details.league>summary{margin-bottom:6px}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center;margin:4px 0 6px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.seg button{background:transparent;border:0;border-right:1px solid var(--line);color:var(--mut);padding:7px 14px;font:inherit;font-size:13px;cursor:pointer}
+.seg button:last-child{border-right:0}
+.seg button:hover{color:var(--txt)}
+.seg button.on{background:rgba(57,135,229,.18);color:var(--txt);font-weight:600}
+.nav-badge{display:inline-block;min-width:18px;padding:0 5px;margin-left:4px;border-radius:9px;background:#f85149;color:#fff;font-size:11px;font-weight:700;text-align:center;line-height:18px}
+.live-grid{margin-top:8px}
+@media(max-width:520px){.toolbar{justify-content:center}}
+
+.lg-tag{text-align:center;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--mut);margin-bottom:2px}

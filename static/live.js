@@ -225,6 +225,7 @@
       card.querySelectorAll("[data-market]").forEach(function (chip) { setState(chip, f.tips[chip.dataset.market]); });
       if (f.probs) setPbar(card.querySelector(".pbar"), f.probs);
     });
+    if (window.DiazLayout) window.DiazLayout.refresh();
   }
 
   /* ================================================================ meccsoldal */
@@ -430,6 +431,9 @@
   function pollAll() {
     fetchJson("/api/live").then(function (d) {
       if (!d.enabled) return;
+      var n = Object.keys(d.fixtures).filter(function (id) { return isLive(d.fixtures[id]); }).length;
+      var nb = document.getElementById("nav-live");
+      if (nb) { nb.hidden = !n; nb.textContent = n; }
       Object.keys(d.fixtures).forEach(function (id) {
         var f = d.fixtures[id];
         handleGoals(id, f);
