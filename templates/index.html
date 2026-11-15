@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block page %}index{% endblock %}
 {% block content %}
 <div class="daynav">
   <a href="{{ url_for('index', d=prev_day) }}">←</a>
@@ -8,19 +9,20 @@
 {% for (lid, lname, country), fixtures in groups.items() %}
   <h2>{{ lname }}{% if country %} · {{ country }}{% endif %}</h2>
   {% for f in fixtures %}
-  <div class="card"><a class="row" href="{{ url_for('match', fid=f.id) }}">
-    <div class="teams">
-      <span class="time">{{ f.kickoff|hhmm }}</span>
-      <span style="flex:1">{{ f.home }} – {{ f.away }}</span>
-      {% if f.home_goals is not none %}<span class="score">{{ f.home_goals }}–{{ f.away_goals }}</span>{% endif %}
+  <div class="card match-card" data-fid="{{ f.id }}"><a class="row" href="{{ url_for('match', fid=f.id) }}">
+    <div class="mrow">
+      <div class="mtime"><span class="kick">{{ f.kickoff|hhmm }}</span><span class="live-badge" hidden></span></div>
+      <div class="mteam home"><span>{{ f.home }}</span>{% if f.home_logo %}<img class="logo" src="{{ f.home_logo }}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">{% endif %}</div>
+      <div class="mscore" data-score>{% if f.home_goals is not none and f.status not in ('NS','TBD') %}{{ f.home_goals }} : {{ f.away_goals }}{% else %}–{% endif %}</div>
+      <div class="mteam away">{% if f.away_logo %}<img class="logo" src="{{ f.away_logo }}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">{% endif %}<span>{{ f.away }}</span></div>
     </div>
     {% set o = odds.get(f.id) %}
-    {% if o %}<div class="note" style="margin-top:4px">Szorzó: 1 <b>{{ o.get('Home','–') }}</b> · X <b>{{ o.get('Draw','–') }}</b> · 2 <b>{{ o.get('Away','–') }}</b></div>{% endif %}
+    {% if o %}<div class="note odds-line">Szorzó: 1 <b>{{ o.get('Home','–') }}</b> · X <b>{{ o.get('Draw','–') }}</b> · 2 <b>{{ o.get('Away','–') }}</b></div>{% endif %}
     {% set ts = tips.get(f.id) %}
     {% if ts %}
     <div class="meta">
       {% for m, t in ts.items() %}
-      <span class="chip {{ 'value' if t.value and t.value > 0 }}">{{ MARKET_LABELS[m] }}: <b>{{ t.pick|pick_hu }}</b> {{ t.prob|pct }}
+      <span class="chip {{ 'value' if t.value and t.value > 0 }}" data-market="{{ m }}">{{ MARKET_LABELS[m] }}: <b>{{ t.pick|pick_hu }}</b> {{ t.prob|pct }}
         {% if t.result %}<span class="{{ t.result }}">· {{ RESULT_LABELS[t.result] }}</span>{% endif %}</span>
       {% endfor %}
     </div>

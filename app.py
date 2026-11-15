@@ -5,10 +5,11 @@ from datetime import datetime
 from functools import wraps
 from zoneinfo import ZoneInfo
 
-from flask import Flask, abort, redirect, render_template, request, session, url_for
+from flask import Flask, abort, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
 
 from apifootball import DAILY_BUDGET
+import live
 from db import connect, init_db
 
 TZ = ZoneInfo("Europe/Budapest")
@@ -167,6 +168,29 @@ def match(fid):
         h2h_summary = {"home": hw, "draw": dr, "away": aw}
     return render_template("match.html", f=f, tips=tips, odds=odds, injuries=injuries,
                            h2h=h2h, h2h_summary=h2h_summary, form=form)
+
+
+@app.route("/api/live")
+@login_required
+def api_live():
+    conn = connect()
+    try:
+        return jsonify(live.refresh_live(conn))
+    finally:
+        conn.close()
+
+
+@app.route("/api/match/<int:fid>/live")
+@login_required
+def api_match_live(fid):
+    conn = connect()
+    try:
+        data = live.match_payload(conn, fid)
+    finally:
+        conn.close()
+    if data is None:
+        abort(404)
+    return jsonify(data)
 
 
 @app.route("/history")

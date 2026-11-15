@@ -53,6 +53,12 @@ DIAZBETS_SECURE_COOKIE=0 python app.py
 pytest
 ```
 
+## Élő eredmények (csak Pro)
+
+A listában élő perc és állás látszik, a meccsoldalon eredményjelző, eseményvonal (gólok, lapok, cserék), statisztikasávok
+(labdabirtoklás, lövések, szögletek, xG) és a tippek élő állása. A szerver kérdezi az API-t, és 45 másodpercig tárolja a választ,
+ezért a keretet alig terheli. A befejezett meccsek tippjeit azonnal elszámolja.
+
 ## Pro csomag (API-Football Pro, 7500 kérés/nap)
 
 Az `.env`-ben legyen `DIAZBETS_PLAN=pro`. Ilyenkor a keret 7000 kérés/nap, és a lekérések gyorsak.

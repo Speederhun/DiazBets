@@ -211,3 +211,120 @@ def test_corner_tip_blend_and_integer_line():
     assert solo["pick"].startswith("Under 9.0") and mixed["pick"].startswith("Under 9.0")
     assert mixed["prob"] < solo["prob"]          # a piac (≈50%) lehúzza a túlzott magabiztosságot
     assert 0.5 <= mixed["prob"] <= 1
+
+
+# ---------------------------------------------------------------- élő
+
+import live
+
+
+def test_tip_states():
+    ts = live.tip_state
+    assert ts("BTTS", "Yes", 1, 1, None, "2H") == "won"
+    assert ts("BTTS", "Yes", 1, 0, None, "2H") == "on"
+    assert ts("BTTS", "Yes", 1, 0, None, "FT") == "lost"
+    assert ts("BTTS", "No", 1, 1, None, "1H") == "lost"
+    assert ts("OU2.5", "Over 2.5", 2, 1, None, "2H") == "won"
+    assert ts("OU2.5", "Under 2.5", 2, 1, None, "2H") == "lost"
+    assert ts("OU2.5", "Under 2.5", 1, 1, None, "FT") == "won"
+    assert ts("1X2", "Home", 1, 0, None, "2H") == "on"
+    assert ts("1X2", "Home", 1, 0, None, "FT") == "won"
+    assert ts("1X2", "Draw", 1, 0, None, "FT") == "lost"
+    assert ts("CORNERS", "Over 9.5", 1, 0, 10, "2H") == "won"
+    assert ts("CORNERS", "Under 9.5", 1, 0, 10, "2H") == "lost"
+    assert ts("CORNERS", "Under 9.0", 1, 0, 9, "FT") == "void"
+    assert ts("CORNERS", "Over 9.5", 1, 0, None, "2H") == "open"
+    assert ts("1X2", "Home", None, None, None, "NS") is None
+
+
+def _live_item(fid, status="2H", elapsed=63, hg=1, ag=1):
+    return {
+        "fixture": {"id": fid, "status": {"short": status, "elapsed": elapsed, "extra": None}},
+        "goals": {"home": hg, "away": ag},
+        "events": [
+            {"time": {"elapsed": 12, "extra": None}, "team": {"id": 4}, "player": {"name": "Gólszerző"}, "assist": {"name": "Passzoló"}, "type": "Goal", "detail": "Normal Goal"},
+            {"time": {"elapsed": 30, "extra": None}, "team": {"id": 1}, "player": {"name": "Sárga"}, "assist": {"name": None}, "type": "Card", "detail": "Yellow Card"},
+            {"time": {"elapsed": 55, "extra": None}, "team": {"id": 1}, "player": {"name": "Egyenlítő"}, "assist": {"name": None}, "type": "Goal", "detail": "Penalty"},
+        ],
+        "statistics": [
+            {"team": {"id": 1}, "statistics": [{"type": "Ball Possession", "value": "58%"}, {"type": "Corner Kicks", "value": 6}, {"type": "Total Shots", "value": 12}]},
+            {"team": {"id": 4}, "statistics": [{"type": "Ball Possession", "value": "42%"}, {"type": "Corner Kicks", "value": 5}, {"type": "Total Shots", "value": None}]},
+        ],
+    }
+
+
+class LiveFake:
+    state = {"status": "2H", "hg": 1, "ag": 1}
+    calls = []
+
+    def __init__(self, conn, api_key=None):
+        pass
+
+    def get(self, path, **p):
+        LiveFake.calls.append((path, p))
+        s = LiveFake.state
+        item = _live_item(9001, s["status"], 63 if s["status"] == "2H" else 90, s["hg"], s["ag"])
+        if "live" in p:
+            return {"response": [item] if s["status"] != "FT" else []}
+        return {"response": [item]}
+
+
+def test_live_flow(monkeypatch):
+    import time as _t
+    from datetime import datetime, timedelta, timezone
+    from db import connect
+    monkeypatch.setattr(live, "PRO", True)
+    monkeypatch.setattr(live, "Client", LiveFake)
+    LiveFake.calls.clear()
+    LiveFake.state = {"status": "2H", "hg": 1, "ag": 1}
+    conn = connect()
+    ko = (datetime.now(timezone.utc) - timedelta(minutes=70)).isoformat()
+    conn.execute("UPDATE fixtures SET kickoff=?, status='NS', home_goals=NULL, away_goals=NULL WHERE id=9001", (ko,))
+    conn.execute("DELETE FROM cache")
+    conn.commit()
+
+    d = live.refresh_live(conn)
+    assert d["enabled"] and d["fixtures"]["9001"]["live"] and d["fixtures"]["9001"]["hg"] == 1
+    assert d["fixtures"]["9001"]["elapsed"] == 63
+    n_calls = len(LiveFake.calls)
+    live.refresh_live(conn)
+    assert len(LiveFake.calls) == n_calls  # a gyorsítótár miatt nincs új API-hívás
+
+    p = live.match_payload(conn, 9001)
+    assert p["live"] and p["hg"] == 1 and p["ag"] == 1
+    assert [e["kind"] for e in p["events"]] == ["goal", "yellow", "goal"]
+    assert p["events"][0]["side"] == "away" and p["events"][1]["side"] == "home"
+    labels = {s["key"]: s for s in p["stats"]}
+    assert labels["Ball Possession"]["home"] == 58 and labels["Ball Possession"]["pct"]
+    assert "Total Shots" in labels and labels["Total Shots"]["away"] == 0
+    assert p["corners"] == 11
+    assert p["tips"].get("BTTS") in ("won", "lost")  # van tipp a meccsre, az állás kiszámolva
+
+    # befejeződik a meccs: azonnali elszámolás a szögletstatisztikával együtt
+    LiveFake.state = {"status": "FT", "hg": 1, "ag": 1}
+    conn.execute("DELETE FROM cache")
+    conn.commit()
+    d = live.refresh_live(conn)
+    assert d["fixtures"]["9001"]["status"] == "FT"
+    done = {r["market"]: r["result"] for r in conn.execute("SELECT * FROM tips WHERE fixture_id=9001")}
+    assert all(v is not None for v in done.values()), done
+    conn.close()
+
+
+def test_live_disabled_on_free_plan(monkeypatch):
+    from db import connect
+    monkeypatch.setattr(live, "PRO", False)
+    conn = connect()
+    assert live.refresh_live(conn) == {"enabled": False, "fixtures": {}}
+    conn.close()
+
+
+def test_live_api_requires_login_and_works():
+    from app import app
+    c = app.test_client()
+    assert c.get("/api/live").status_code == 302
+    assert c.get("/api/match/9001/live").status_code == 302
+    c.post("/login", data={"username": "teszt", "password": "jelszo1234"})
+    assert c.get("/api/live").status_code == 200
+    assert c.get("/api/match/9001/live").status_code == 200
+    assert c.get("/api/match/1/live").status_code == 404

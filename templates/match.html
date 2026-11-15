@@ -1,22 +1,45 @@
 {% extends "base.html" %}
 {% block title %}{{ f.home }} – {{ f.away }}{% endblock %}
+{% block page %}match{% endblock %}
 {% block content %}
 <a class="note" href="{{ url_for('index', d=f.day) }}">← vissza</a>
-<h1 style="margin:6px 0 2px">{{ f.home }} – {{ f.away }}</h1>
-<div class="note">{{ f.league_name }} · {{ f.day }} {{ f.kickoff|hhmm }}
-  {% if f.home_goals is not none %}· Végeredmény: <b>{{ f.home_goals }}–{{ f.away_goals }}</b>{% endif %}</div>
+
+<section class="scoreboard" id="scoreboard" data-fid="{{ f.id }}" data-kickoff="{{ f.kickoff }}" data-status="{{ f.status }}">
+  <div class="sb-league">{{ f.league_name }} · {{ f.day }}</div>
+  <div class="sb-main">
+    <div class="sb-team">
+      {% if f.home_logo %}<img class="sb-logo" src="{{ f.home_logo }}" alt="" onerror="this.style.visibility='hidden'">{% endif %}
+      <div class="sb-name">{{ f.home }}</div>
+    </div>
+    <div class="sb-center">
+      <div class="sb-score" id="sb-score"><span id="sb-hg">{{ f.home_goals if f.home_goals is not none and f.status not in ('NS','TBD') else '' }}</span><span class="sb-sep">{{ ':' if f.home_goals is not none and f.status not in ('NS','TBD') else '' }}</span><span id="sb-ag">{{ f.away_goals if f.away_goals is not none and f.status not in ('NS','TBD') else '' }}</span>{% if f.status in ('NS','TBD') %}<span class="sb-kick">{{ f.kickoff|hhmm }}</span>{% endif %}</div>
+      <div class="sb-status" id="sb-status">{{ 'Kezdés előtt' if f.status in ('NS','TBD') else '' }}</div>
+    </div>
+    <div class="sb-team">
+      {% if f.away_logo %}<img class="sb-logo" src="{{ f.away_logo }}" alt="" onerror="this.style.visibility='hidden'">{% endif %}
+      <div class="sb-name">{{ f.away }}</div>
+    </div>
+  </div>
+  <div class="sb-progress" id="sb-progress" hidden><div id="sb-bar"></div></div>
+</section>
+
+<h2 id="h-events" hidden>Események</h2>
+<div id="events" class="timeline"></div>
+
+<h2 id="h-stats" hidden>Élő statisztika</h2>
+<div id="stats" class="statbox" hidden></div>
 
 <h2>Tippek</h2>
 {% if tips %}
 <div class="card"><table>
-  <tr><th>Piac</th><th>Tipp</th><th class="num">Esély</th><th class="num">Szorzó</th><th class="num">Érték</th><th></th></tr>
+  <tr><th>Piac</th><th>Tipp</th><th class="num">Esély</th><th class="num">Szorzó</th><th class="num">Érték</th><th>Állás</th></tr>
   {% for t in tips %}
   <tr>
     <td>{{ MARKET_LABELS[t.market] }}</td><td><b>{{ t.pick|pick_hu }}</b></td>
     <td class="num">{{ t.prob|pct }}</td>
     <td class="num">{{ '%.2f'|format(t.odds) if t.odds else '–' }}</td>
     <td class="num {{ 'win' if t.value and t.value > 0 }}">{{ '%+.0f%%'|format(t.value*100) if t.value is not none else '–' }}</td>
-    <td class="{{ t.result or '' }}">{{ RESULT_LABELS.get(t.result, '') }}</td>
+    <td data-market="{{ t.market }}"><span class="state-pill {{ t.result or '' }}">{{ RESULT_LABELS.get(t.result, '') }}</span></td>
   </tr>
   {% endfor %}
 </table></div>

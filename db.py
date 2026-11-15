@@ -61,6 +61,11 @@ CREATE TABLE IF NOT EXISTS fixture_stats (
     corners INTEGER,
     PRIMARY KEY (fixture_id, team_id)
 );
+CREATE TABLE IF NOT EXISTS cache (
+    key TEXT PRIMARY KEY,
+    ts REAL NOT NULL,
+    json TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS fetched_days (
     day TEXT PRIMARY KEY
 );
