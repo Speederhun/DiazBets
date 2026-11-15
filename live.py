@@ -16,7 +16,7 @@ LIVE_STATUSES = {"1H", "HT", "2H", "ET", "BT", "P", "SUSP", "INT", "LIVE"}
 PLAYED_FINAL = {"FT", "AET", "PEN"}
 FINAL_STATUSES = PLAYED_FINAL | {"PST", "CANC", "ABD", "AWD", "WO"}
 TTL = 45               # másodperc: ennyi ideig használjuk újra egy élő lekérés eredményét
-LIVE_RESERVE = min(300, DAILY_BUDGET // 4)  # az élő funkció ennyi kérést mindig meghagy a napi gyűjtésnek
+LIVE_RESERVE = 0  # az élő funkció a teljes keretet használhatja: a gyűjtés/visszatöltés már korábban (RESERVE-vel) megáll
 LINEUP_LEAD = 80       # perc: a kezdés előtt ennyivel már kérdezzük a felállást
 
 MARKET_HU = {"1X2": "Győztes", "BTTS": "Mindkét csapat szerez gólt", "OU2.5": "Gólok (2.5)", "CORNERS": "Szögletek"}

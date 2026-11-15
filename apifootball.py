@@ -9,7 +9,7 @@ BASE_URL = "https://v3.football.api-sports.io"
 # DIAZBETS_PLAN=pro: 7500 kérés/nap és 300/perc. Az ingyenes csomag 100/nap és 10/perc.
 PRO = os.environ.get("DIAZBETS_PLAN", "free").lower() == "pro"
 # Biztonsági tartalék a napi limit alatt.
-DAILY_BUDGET = int(os.environ.get("DIAZBETS_DAILY_BUDGET", "7000" if PRO else "90"))
+DAILY_BUDGET = int(os.environ.get("DIAZBETS_DAILY_BUDGET", "7300" if PRO else "90"))
 REQUEST_DELAY = float(os.environ.get("DIAZBETS_REQUEST_DELAY", "0.25" if PRO else "6.5"))
 
 
