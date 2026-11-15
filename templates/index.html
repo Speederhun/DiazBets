@@ -20,7 +20,7 @@
     {% set pr = preds.get(f.id) %}
     {% if pr %}<div class="pbar-wrap" data-pred="1">{{ pbar(pr, 'compact') }}</div>{% endif %}
     {% set o = odds.get(f.id) %}
-    {% if o %}<div class="note odds-line">Szorzó: 1 <b>{{ o.get('Home','–') }}</b> · X <b>{{ o.get('Draw','–') }}</b> · 2 <b>{{ o.get('Away','–') }}</b></div>{% endif %}
+    {% if o %}<div class="odds-line"><span class="od"><i>1</i><b>{{ o.get('Home','–') }}</b></span><span class="od"><i>X</i><b>{{ o.get('Draw','–') }}</b></span><span class="od"><i>2</i><b>{{ o.get('Away','–') }}</b></span></div>{% endif %}
     {% set ts = tips.get(f.id) %}
     {% if ts %}
     <div class="meta">

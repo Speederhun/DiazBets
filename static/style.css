@@ -40,7 +40,11 @@ th{color:var(--mut);font-weight:500;font-size:13px}td.num,th.num{text-align:righ
 .mteam.home{justify-content:flex-end;text-align:right}
 .logo{width:22px;height:22px;object-fit:contain;flex:none}
 .mscore{font-weight:800;font-size:18px;min-width:56px;text-align:center;font-variant-numeric:tabular-nums;letter-spacing:.02em}
-.odds-line{margin-top:6px;text-align:center}
+.odds-line{margin-top:8px;display:flex;justify-content:center;gap:8px}
+.odds-line .od{display:inline-flex;align-items:baseline;gap:7px;padding:5px 12px;border:1px solid var(--line,#30363d);border-radius:8px;background:rgba(255,255,255,.03)}
+.odds-line .od i{font-style:normal;font-size:12px;color:var(--mut)}
+.odds-line .od b{font-size:18px;font-weight:700;color:var(--txt);font-variant-numeric:tabular-nums}
+@media(max-width:480px){.odds-line{gap:6px}.odds-line .od{padding:4px 9px;gap:5px}.odds-line .od b{font-size:16px}}
 .match-card .meta{justify-content:center}
 .match-card.is-live{border-color:#f8514955;box-shadow:0 0 0 1px #f8514933,0 6px 24px -12px #f8514988}
 .live-badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:700;color:#ff7b72}
