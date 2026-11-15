@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from flask import Flask, abort, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
 
+from apifootball import DAILY_BUDGET
 from db import connect, init_db
 
 TZ = ZoneInfo("Europe/Budapest")
@@ -123,7 +124,7 @@ def index():
     for f in fixtures:
         groups.setdefault((f["league_id"], f["league_name"], f["country"]), []).append(f)
     return render_template("index.html", day=day, groups=groups, tips=tips, odds=odds,
-                           prev_day=_shift(day, -1), next_day=_shift(day, 1), api_used=used["count"] if used else 0)
+                           prev_day=_shift(day, -1), next_day=_shift(day, 1), api_used=used["count"] if used else 0, api_budget=DAILY_BUDGET)
 
 
 def _shift(day, delta):

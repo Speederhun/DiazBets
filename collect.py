@@ -353,11 +353,12 @@ def generate_tips(conn, day):
         if avg_h and model.enough_data(teams, f["home_id"], f["away_id"]):
             xg = model.expected_goals(teams, avg_h, avg_a, f["home_id"], f["away_id"])
         if xg:
-            probs = model.blend(model.probabilities(*xg), odds, weight)
+            w = model.adaptive_weight(weight, model.min_games(teams, f["home_id"], f["away_id"]))
+            probs = model.blend(model.probabilities(*xg), odds, w)
             new_tips = model.build_tips(probs, odds, *xg)
-            if weight and model.market_probs(odds):
+            if w and model.market_probs(odds):
                 for t in new_tips:
-                    t["note"] += f" A tipp a saját modell és a szorzók átlaga (piac súlya {weight:.0%})."
+                    t["note"] += f" A tipp a saját modell és a szorzók átlaga (piac súlya {w:.0%}, kevés meccsnél nagyobb)."
         else:
             # Kevés saját adat: szorzó alapú tartalék tipp (ha van szorzó)
             new_tips = model.tips_from_odds(odds)

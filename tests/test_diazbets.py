@@ -193,3 +193,10 @@ def test_fetch_paged_without_page_param():
 
 def test_reserve_never_exceeds_budget():
     assert collect.RESERVE <= collect.DAILY_BUDGET // 4
+
+
+def test_adaptive_weight():
+    assert model.adaptive_weight(0.5, 15) == 0.5
+    assert model.adaptive_weight(0.5, 40) == 0.5
+    assert model.adaptive_weight(0.5, 3) > 0.85
+    assert model.adaptive_weight(0.5, 0) == 1.0

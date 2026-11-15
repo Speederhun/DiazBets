@@ -273,3 +273,16 @@ def blend(probs, odds, w):
     for k in ("Home", "Draw", "Away"):
         out[k] /= total
     return out
+
+
+def adaptive_weight(base, games):
+    """Kevés meccses csapatoknál a piac súlya nő: 15 meccsnél már az alap, 0-nál 1 felé tart."""
+    shortfall = max(0.0, 1 - games / 15)
+    return base + (1 - base) * shortfall
+
+
+def min_games(teams, home_id, away_id):
+    def g(tid):
+        t = teams.get(tid)
+        return (t["hp"] + t["ap"]) if t else 0
+    return min(g(home_id), g(away_id))
