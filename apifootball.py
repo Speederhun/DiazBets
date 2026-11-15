@@ -6,8 +6,11 @@ from datetime import datetime, timezone
 import requests
 
 BASE_URL = "https://v3.football.api-sports.io"
-# Biztonsági tartalék a 100-as napi limit alatt.
-DAILY_BUDGET = int(os.environ.get("DIAZBETS_DAILY_BUDGET", "90"))
+# DIAZBETS_PLAN=pro: 7500 kérés/nap és 300/perc. Az ingyenes csomag 100/nap és 10/perc.
+PRO = os.environ.get("DIAZBETS_PLAN", "free").lower() == "pro"
+# Biztonsági tartalék a napi limit alatt.
+DAILY_BUDGET = int(os.environ.get("DIAZBETS_DAILY_BUDGET", "7000" if PRO else "90"))
+REQUEST_DELAY = float(os.environ.get("DIAZBETS_REQUEST_DELAY", "0.25" if PRO else "6.5"))
 
 
 class BudgetExceeded(Exception):
@@ -56,5 +59,5 @@ class Client:
             # Az API üres listát vagy dictet ad hiba nélkül.
             raise ApiError(f"{path}: {errors}")
         # Percenkénti limit (ingyenes csomag: 10/perc) kímélése.
-        time.sleep(float(os.environ.get("DIAZBETS_REQUEST_DELAY", "6.5")))
+        time.sleep(REQUEST_DELAY)
         return data

@@ -113,7 +113,7 @@ def _tip(market, pick, prob, price, note):
 
 def tips_from_odds(odds):
     """Tartalék: a szorzókból, a fogadóiroda árrésének levonásával számolt esélyek. Érték nincs, mert nincs saját becslés."""
-    note = "Tabella-adat híján a tipp a szorzókból számolt esélyen alapul (nincs saját becslés)."
+    note = "Kevés saját adat van a csapatokról, ezért a tipp a szorzókból számolt esélyen alapul (nincs saját becslés)."
     tips = []
     for market, sels in (("1X2", ("Home", "Draw", "Away")), ("BTTS", ("Yes", "No")),
                          ("OU2.5", ("Over 2.5", "Under 2.5"))):
@@ -171,3 +171,105 @@ def enough_data(teams, home_id, away_id):
         t = teams.get(tid)
         return (t["hp"] + t["ap"]) if t else 0
     return games(home_id) >= MIN_GAMES and games(away_id) >= MIN_GAMES
+
+
+# ---------------------------------------------------------------- szögletek
+
+def corner_table(rows):
+    """rows: home_id, away_id, hc (hazai szögletek), ac (vendég szögletek). Visszaad: teams, átlag hazai, átlag vendég."""
+    teams = {}
+    th = ta = n = 0
+
+    def t(tid):
+        return teams.setdefault(tid, {"hp": 0, "hf": 0, "ha": 0, "ap": 0, "af": 0, "aa": 0})
+
+    for r in rows:
+        h, a = t(r["home_id"]), t(r["away_id"])
+        h["hp"] += 1; h["hf"] += r["hc"]; h["ha"] += r["ac"]
+        a["ap"] += 1; a["af"] += r["ac"]; a["aa"] += r["hc"]
+        th += r["hc"]; ta += r["ac"]; n += 1
+    if n == 0:
+        return teams, None, None
+    return teams, th / n, ta / n
+
+
+def expected_corners(teams, avg_h, avg_a, home_id, away_id):
+    h, a = teams.get(home_id), teams.get(away_id)
+    if not h or not a or not avg_h or not avg_a:
+        return None
+    if h["hp"] + h["ap"] < MIN_GAMES or a["hp"] + a["ap"] < MIN_GAMES:
+        return None
+    att_h = _rate(h["hf"], h["hp"], avg_h)
+    def_h = _rate(h["ha"], h["hp"], avg_a)
+    att_a = _rate(a["af"], a["ap"], avg_a)
+    def_a = _rate(a["aa"], a["ap"], avg_h)
+    return avg_h * att_h * def_a, avg_a * att_a * def_h
+
+
+def poisson_cdf(k, lam):
+    return sum(_pois(i, lam) for i in range(0, int(k) + 1))
+
+
+def corner_tip(lam_total, odds):
+    """A rendelkezésre álló szögletvonalak közül a várható értékhez legközelebbit választja.
+    Visszaad egy tippet vagy None-t."""
+    lines = {}
+    for (market, sel), price in odds.items():
+        if market != "CORNERS":
+            continue
+        parts = sel.split()
+        if len(parts) == 2 and parts[0] in ("Over", "Under"):
+            try:
+                lines.setdefault(float(parts[1]), {})[parts[0]] = price
+            except ValueError:
+                pass
+    full = {x: v for x, v in lines.items() if "Over" in v and "Under" in v}
+    if full:
+        line = min(full, key=lambda x: abs(x - lam_total))
+    else:
+        line = int(lam_total) + 0.5
+    p_over = 1 - poisson_cdf(line, lam_total)
+    side, p = ("Over", p_over) if p_over >= 0.5 else ("Under", 1 - p_over)
+    price = lines.get(line, {}).get(side)
+    note = f"Várható szögletek: {lam_total:.1f} (vonal: {line})."
+    return _tip("CORNERS", f"{side} {line}", p, price, note)
+
+
+# ---------------------------------------------------------------- vegyítés a piaccal
+
+def market_probs(odds):
+    """A fogadóiroda szorzóiból, az árrés levonásával számolt esélyek (amit csak lehet)."""
+    out = {}
+
+    def norm(market, sels):
+        prices = [odds.get((market, s)) for s in sels]
+        if not all(prices):
+            return None
+        inv = [1 / p for p in prices]
+        tot = sum(inv)
+        return [x / tot for x in inv]
+
+    r = norm("1X2", ("Home", "Draw", "Away"))
+    if r:
+        out["Home"], out["Draw"], out["Away"] = r
+    r = norm("BTTS", ("Yes", "No"))
+    if r:
+        out["BTTS"] = r[0]
+    r = norm("OU2.5", ("Over 2.5", "Under 2.5"))
+    if r:
+        out["Over25"] = r[0]
+    return out
+
+
+def blend(probs, odds, w):
+    """Saját modell és piaci esély súlyozott átlaga. w = a piac súlya (0..1)."""
+    if not w:
+        return probs
+    mk = market_probs(odds)
+    out = dict(probs)
+    for k, v in mk.items():
+        out[k] = (1 - w) * probs[k] + w * v
+    total = out["Home"] + out["Draw"] + out["Away"]
+    for k in ("Home", "Draw", "Away"):
+        out[k] /= total
+    return out

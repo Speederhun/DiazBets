@@ -128,3 +128,51 @@ def test_collect_survives_plan_errors_and_builds_tips_from_results(monkeypatch):
     assert len(tips) == 3  # 4 nap x 2 meccs -> mindkét csapatnak van elég saját adata
     assert conn.execute("SELECT COUNT(*) FROM fixtures WHERE id = 778").fetchone()[0] == 0  # nem figyelt liga
     conn.close()
+
+
+def test_corner_model_and_tip():
+    rows = [{"home_id": 1, "away_id": 2, "hc": 7, "ac": 3}] * 4 + [{"home_id": 2, "away_id": 1, "hc": 5, "ac": 4}] * 4
+    teams, ah, aa = model.corner_table(rows)
+    lam = model.expected_corners(teams, ah, aa, 1, 2)
+    assert lam and 3 < sum(lam) < 15
+    assert model.expected_corners(teams, ah, aa, 1, 99) is None
+    odds = {("CORNERS", "Over 9.5"): 1.9, ("CORNERS", "Under 9.5"): 1.9,
+            ("CORNERS", "Over 11.5"): 3.0, ("CORNERS", "Under 11.5"): 1.3}
+    tip = model.corner_tip(10.2, odds)
+    assert tip["market"] == "CORNERS" and tip["pick"].endswith("9.5") and tip["odds"] == 1.9
+    assert 0.5 <= tip["prob"] <= 1
+    assert model.corner_tip(10.2, {})["odds"] is None  # szorzó nélkül is ad tippet
+
+
+def test_judge_corners():
+    assert collect.judge_corners("Over 9.5", 12) == "win"
+    assert collect.judge_corners("Over 9.5", 9) == "loss"
+    assert collect.judge_corners("Under 9.5", 9) == "win"
+
+
+def test_blend_moves_toward_market():
+    own = model.probabilities(2.0, 0.8)
+    odds = {("1X2", "Home"): 3.0, ("1X2", "Draw"): 3.3, ("1X2", "Away"): 2.4}
+    mixed = model.blend(own, odds, 0.5)
+    mk = model.market_probs(odds)
+    assert abs(mixed["Home"] + mixed["Draw"] + mixed["Away"] - 1) < 1e-9
+    assert min(own["Home"], mk["Home"]) < mixed["Home"] < max(own["Home"], mk["Home"])
+    assert model.blend(own, odds, 0) == own
+    assert model.blend(own, {}, 0.5) == own  # szorzó nélkül nem változik
+
+
+def test_settle_corners_and_stats_storage():
+    from db import connect
+    conn = connect()
+    conn.execute("""INSERT OR REPLACE INTO fixtures(id, day, kickoff, league_id, season, home_id, home, away_id, away,
+                    status, home_goals, away_goals) VALUES (5001,'2026-01-01','2026-01-01T15:00:00+01:00',39,2026,1,'A',2,'B','FT',1,0)""")
+    conn.execute("INSERT OR REPLACE INTO tips(fixture_id, market, pick, prob, odds, value, note, result) VALUES (5001,'CORNERS','Over 9.5',0.6,1.9,0.14,'',NULL)")
+    conn.commit()
+    assert collect.settle_local(conn) >= 0
+    assert conn.execute("SELECT result FROM tips WHERE fixture_id=5001").fetchone()["result"] is None  # még nincs statisztika
+    collect.store_stats(conn, 5001, [
+        {"team": {"id": 1}, "statistics": [{"type": "Corner Kicks", "value": 7}]},
+        {"team": {"id": 2}, "statistics": [{"type": "Corner Kicks", "value": 4}]}])
+    collect.settle_local(conn)
+    assert conn.execute("SELECT result FROM tips WHERE fixture_id=5001").fetchone()["result"] == "win"
+    conn.close()

@@ -3,15 +3,17 @@
 Használat:
     python collect.py collect [YYYY-MM-DD]   # meccsek, szorzók, sérültek, H2H, tippek
     python collect.py settle                 # tegnapi és mai eredmények, tippek elszámolása
+    python collect.py stats [db]             # szögletstatisztika letöltése a lejátszott meccsekhez (Pro)
     python collect.py backfill [napok]       # múltbeli eredmények letöltése a modellhez (alap: 45 nap)
 """
 import json
+import os
 import sys
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import model
-from apifootball import ApiError, BudgetExceeded, Client
+from apifootball import DAILY_BUDGET, PRO, ApiError, BudgetExceeded, Client, used_today
 from db import connect, init_db
 
 TZ = ZoneInfo("Europe/Budapest")
@@ -35,6 +37,8 @@ LEAGUES = [
 LEAGUE_ORDER = {lid: i for i, (lid, _) in enumerate(LEAGUES)}
 
 BOOKMAKER = 8  # Bet365
+PER_FIXTURE_LIMIT = 60 if PRO else 12   # meccsenkénti tartalék lekérések száma
+RESERVE = 500 if PRO else 25            # a visszatöltés/statisztika ennyi kérést mindig meghagy
 BET_IDS = {1: "1X2", 8: "BTTS", 5: "OU", 45: "CORNERS"}
 FINISHED = {"FT", "AET", "PEN"}
 
@@ -157,6 +161,55 @@ def fetch_paged(client, path, max_pages=8, **params):
         page += 1
 
 
+def store_stats(conn, fixture_id, items):
+    """Szögletek tárolása. Üres válasznál 0-s csapatazonosítóval jelöljük, hogy ne kérjük újra."""
+    n = 0
+    for it in items:
+        corners = None
+        for st in it.get("statistics", []):
+            if st.get("type") == "Corner Kicks":
+                corners = st.get("value")
+                break
+        conn.execute("INSERT OR REPLACE INTO fixture_stats(fixture_id, team_id, corners) VALUES (?,?,?)",
+                     (fixture_id, it["team"]["id"], int(corners) if corners is not None else None))
+        n += 1
+    if n == 0:
+        conn.execute("INSERT OR REPLACE INTO fixture_stats(fixture_id, team_id, corners) VALUES (?,0,NULL)", (fixture_id,))
+    conn.commit()
+
+
+def collect_stats(conn, client, limit=500):
+    rows = conn.execute(
+        """SELECT id FROM fixtures f WHERE status = 'FT'
+             AND NOT EXISTS (SELECT 1 FROM fixture_stats s WHERE s.fixture_id = f.id)
+           ORDER BY kickoff DESC LIMIT ?""", (limit,)).fetchall()
+    done = 0
+    for r in rows:
+        if used_today(conn) >= DAILY_BUDGET - RESERVE:
+            log("A keret nagy része elfogyott, a statisztika-letöltést holnap folytasd.")
+            break
+        d = client.get("fixtures/statistics", fixture=r["id"])
+        store_stats(conn, r["id"], d.get("response", []))
+        done += 1
+    left = conn.execute("""SELECT COUNT(*) FROM fixtures f WHERE status = 'FT'
+        AND NOT EXISTS (SELECT 1 FROM fixture_stats s WHERE s.fixture_id = f.id)""").fetchone()[0]
+    log(f"szögletstatisztika: {done} meccs letöltve, {left} még hátravan")
+
+
+def stats_cmd(limit=500):
+    init_db()
+    conn = connect()
+    client = Client(conn)
+    try:
+        collect_stats(conn, client, limit)
+    except BudgetExceeded:
+        log("Elfogyott a napi kéréskeret.")
+    except ApiError as e:
+        log(f"API hiba: {e}")
+    finally:
+        conn.close()
+
+
 def _safe(label, fn):
     """Egy lépés hibája ne állítsa le a többit. A keret elfogyása viszont mindent leállít."""
     try:
@@ -202,7 +255,7 @@ def collect(day=None):
 
         def odds_by_fixture():
             ok = 0
-            for f in ordered[:12]:
+            for f in ordered[:PER_FIXTURE_LIMIT]:
                 d = client.get("odds", fixture=f["id"], bookmaker=BOOKMAKER)
                 store_odds(conn, d.get("response", []))
                 ok += bool(d.get("response"))
@@ -218,7 +271,7 @@ def collect(day=None):
 
         def injuries_by_fixture():
             total = 0
-            for f in ordered[:12]:
+            for f in ordered[:PER_FIXTURE_LIMIT]:
                 d = client.get("injuries", fixture=f["id"])
                 store_injuries(conn, d.get("response", []))
                 total += len(d.get("response", []))
@@ -251,14 +304,13 @@ def backfill(days=45):
     init_db()
     conn = connect()
     client = Client(conn)
-    from apifootball import DAILY_BUDGET, used_today
     done = 0
     try:
         for i in range(1, days + 1):
             d = (datetime.now(TZ) - timedelta(days=i)).strftime("%Y-%m-%d")
             if conn.execute("SELECT 1 FROM fetched_days WHERE day=?", (d,)).fetchone():
                 continue
-            if used_today(conn) >= DAILY_BUDGET - 25:
+            if used_today(conn) >= DAILY_BUDGET - RESERVE:
                 log("A keret nagy része elfogyott, a visszatöltést holnap folytasd ugyanezzel a paranccsal.")
                 break
             data = client.get("fixtures", date=d, timezone="Europe/Budapest")
@@ -285,6 +337,14 @@ def load_odds(conn, fixture_id):
 
 def generate_tips(conn, day):
     teams, avg_h, avg_a = model.load_results_table(conn, day)
+    corner_rows = conn.execute(
+        """SELECT f.home_id, f.away_id, sh.corners AS hc, sa.corners AS ac
+           FROM fixtures f
+           JOIN fixture_stats sh ON sh.fixture_id = f.id AND sh.team_id = f.home_id
+           JOIN fixture_stats sa ON sa.fixture_id = f.id AND sa.team_id = f.away_id
+           WHERE f.status = 'FT' AND sh.corners IS NOT NULL AND sa.corners IS NOT NULL AND f.day <= ?""", (day,)).fetchall()
+    c_teams, c_avg_h, c_avg_a = model.corner_table(corner_rows)
+    weight = float(os.environ.get("DIAZBETS_MARKET_WEIGHT", "0.5"))
     count = 0
     for f in conn.execute("SELECT * FROM fixtures WHERE day = ? AND status = 'NS'", (day,)).fetchall():
         odds = load_odds(conn, f["id"])
@@ -292,10 +352,17 @@ def generate_tips(conn, day):
         if avg_h and model.enough_data(teams, f["home_id"], f["away_id"]):
             xg = model.expected_goals(teams, avg_h, avg_a, f["home_id"], f["away_id"])
         if xg:
-            new_tips = model.build_tips(model.probabilities(*xg), odds, *xg)
+            probs = model.blend(model.probabilities(*xg), odds, weight)
+            new_tips = model.build_tips(probs, odds, *xg)
+            if weight and model.market_probs(odds):
+                for t in new_tips:
+                    t["note"] += f" A tipp a saját modell és a szorzók átlaga (piac súlya {weight:.0%})."
         else:
             # Kevés saját adat: szorzó alapú tartalék tipp (ha van szorzó)
             new_tips = model.tips_from_odds(odds)
+        cx = model.expected_corners(c_teams, c_avg_h, c_avg_a, f["home_id"], f["away_id"]) if c_avg_h else None
+        if cx:
+            new_tips.append(model.corner_tip(cx[0] + cx[1], odds))
         for t in new_tips:
             conn.execute(
                 """INSERT INTO tips(fixture_id, market, pick, prob, odds, value, note)
@@ -326,6 +393,12 @@ def judge(market, pick, hg, ag):
     raise ValueError(market)
 
 
+def judge_corners(pick, total):
+    side, line = pick.split()
+    over = total > float(line)
+    return "win" if (side == "Over") == over else "loss"
+
+
 def settle_local(conn):
     n = 0
     rows = conn.execute(
@@ -334,6 +407,15 @@ def settle_local(conn):
            WHERE t.result IS NULL AND f.status IN ('FT','AET','PEN')
              AND f.home_goals IS NOT NULL AND f.away_goals IS NOT NULL""").fetchall()
     for r in rows:
+        if r["market"] == "CORNERS":
+            tot = conn.execute("""SELECT SUM(corners) s, COUNT(corners) n FROM fixture_stats
+                                  WHERE fixture_id = ? AND team_id != 0""", (r["fixture_id"],)).fetchone()
+            if not tot or tot["n"] < 2:
+                continue  # a szögletstatisztika még nem érkezett meg, később számoljuk el
+            res = judge_corners(r["pick"], tot["s"]) if r["status"] == "FT" else "void"
+            conn.execute("UPDATE tips SET result=? WHERE fixture_id=? AND market=?", (res, r["fixture_id"], r["market"]))
+            n += 1
+            continue
         # Hosszabbítás/tizenegyesek után a gólok nem a 90 perces állást mutatják: ezeket érvénytelenre tesszük.
         if r["status"] == "FT":
             res = judge(r["market"], r["pick"], r["home_goals"], r["away_goals"])
@@ -353,6 +435,8 @@ def settle():
         for d in ((datetime.now(TZ) - timedelta(days=1)).strftime("%Y-%m-%d"), today()):
             data = client.get("fixtures", date=d, timezone="Europe/Budapest")
             store_fixtures(conn, data.get("response", []), d)
+        if PRO:
+            collect_stats(conn, client, limit=150)
     except (BudgetExceeded, ApiError) as e:
         log(f"Elszámolás részleges: {e}")
     finally:
@@ -366,6 +450,8 @@ if __name__ == "__main__":
         collect(sys.argv[2] if len(sys.argv) > 2 else None)
     elif cmd == "settle":
         settle()
+    elif cmd == "stats":
+        stats_cmd(int(sys.argv[2]) if len(sys.argv) > 2 else 500)
     elif cmd == "backfill":
         backfill(int(sys.argv[2]) if len(sys.argv) > 2 else 45)
     else:

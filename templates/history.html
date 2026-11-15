@@ -16,12 +16,24 @@
 {% endfor %}
 <p class="note">* Néhány tippnél nem volt elérhető szorzó, azok a profitba nem számítanak bele.</p>
 
+<h2>Pontosság: stimmel-e az esély?</h2>
+{% if calib %}
+<div class="card"><table>
+  <tr><th>Megadott esély</th><th class="num">Tipp</th><th class="num">Átlagos esély</th><th class="num">Tényleges találat</th></tr>
+  {% for c in calib %}
+  <tr><td>{{ c.label }}</td><td class="num">{{ c.n }}</td><td class="num">{{ c.predicted|pct }}</td>
+    <td class="num {{ 'win' if c.actual >= c.predicted else 'loss' }}">{{ c.actual|pct }}</td></tr>
+  {% endfor %}
+</table></div>
+<p class="note">Ha a modell jó, a két oszlop közel egyezik. Kevés tippnél (10 alatt egy sávban) a szám még ingadozik, ne vonj le belőle következtetést.</p>
+{% else %}<p class="note">Még nincs elég elszámolt tipp.</p>{% endif %}
+
 <h2>Elszámolt tippek</h2>
 <div class="card"><table>
   {% for r in rows %}
   <tr><td class="note">{{ r.day }}</td>
     <td>{{ r.home }} – {{ r.away }} <span class="note">({{ r.home_goals }}–{{ r.away_goals }})</span></td>
-    <td>{{ MARKET_LABELS[r.market] }}: <b>{{ PICK_LABELS[r.pick] }}</b></td>
+    <td>{{ MARKET_LABELS[r.market] }}: <b>{{ r.pick|pick_hu }}</b></td>
     <td class="{{ r.result }}">{{ RESULT_LABELS[r.result] }}</td></tr>
   {% else %}<tr><td class="note">Még nincs adat.</td></tr>{% endfor %}
 </table></div>

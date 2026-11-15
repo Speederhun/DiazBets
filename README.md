@@ -53,12 +53,28 @@ DIAZBETS_SECURE_COOKIE=0 python app.py
 pytest
 ```
 
-## Korlátok (ingyenes csomag)
+## Pro csomag (API-Football Pro, 7500 kérés/nap)
 
-- Az API-Football ingyenes csomagja a **tabella-, szorzó- és sérült-végpontoknál csak a 2022–2024-es szezonokat engedi**.
-  Ezért a modell a csapatok formáját a saját eredményadatbázisból számolja (napi meccslista, ez működik).
-  Első használatkor töltsd vissza a múltat: `python collect.py backfill 45` (napi 1 kérés, a keret miatt több napra széthúzódhat).
-- A szorzókat és sérülteket többféle lekéréssel próbálja a program; ha az ingyenes csomag egyiket sem engedi,
-  a meccsoldalon üres marad (a napló írja a pontos okot). Fizetős csomagnál (Pro, 19 USD/hó) ez mind működik.
-- Kevés saját adatú csapatoknál (kevesebb mint 3 meccs) szorzó alapú tartalék tipp készül, ha van szorzó.
-- Szöglettippet a program nem ad.
+Az `.env`-ben legyen `DIAZBETS_PLAN=pro`. Ilyenkor a keret 7000 kérés/nap, és a lekérések gyorsak.
+
+Első beállítás (egyszer, a gyűjtés előtt):
+
+```bash
+cd /opt/diazbets
+sudo -u diazbets bash -c 'set -a; . ./.env; set +a; .venv/bin/python collect.py backfill 365'   # egy év eredményei
+sudo -u diazbets bash -c 'set -a; . ./.env; set +a; .venv/bin/python collect.py stats 3000'     # szögletstatisztika
+```
+
+A `stats` meccsenként 1 kérés, a keret miatt több napra széttörhet: a kiírás jelzi, mennyi van hátra, és ugyanazt a parancsot kell újra futtatni.
+Az éjszakai `settle` a friss meccsek szögletstatisztikáját magától letölti.
+
+- Tippek: Poisson-modell a saját eredményadatbázisból, a fogadóirodai szorzókból számolt eséllyel vegyítve (`DIAZBETS_MARKET_WEIGHT`, alap 0,5).
+- Szöglet: a csapatok szögletmutatóiból várható összes szöglet, a szorzóvonalak közül a legközelebbit választja.
+- Az előzményeknél a találati arány mellett kalibrációs tábla mutatja, stimmel-e a megadott esély a valósággal.
+
+## Ingyenes csomag korlátai
+
+- A tabella-, szorzó- és sérült-végpontok csak a 2022–2024-es szezonokat engedik; egymás elleni lekérésnél a `last` paraméter nem használható.
+- Napi 100 kérés, percenként 10 (`DIAZBETS_PLAN=free`).
+- A szöglet-statisztika letöltése meccsenként 1 kérés, ingyen nem praktikus.
+- Kevés saját adatú csapatoknál (kevesebb mint 3 meccs) szorzó alapú tartalék tipp készül.

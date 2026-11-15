@@ -12,7 +12,7 @@
   <tr><th>Piac</th><th>Tipp</th><th class="num">Esély</th><th class="num">Szorzó</th><th class="num">Érték</th><th></th></tr>
   {% for t in tips %}
   <tr>
-    <td>{{ MARKET_LABELS[t.market] }}</td><td><b>{{ PICK_LABELS[t.pick] }}</b></td>
+    <td>{{ MARKET_LABELS[t.market] }}</td><td><b>{{ t.pick|pick_hu }}</b></td>
     <td class="num">{{ t.prob|pct }}</td>
     <td class="num">{{ '%.2f'|format(t.odds) if t.odds else '–' }}</td>
     <td class="num {{ 'win' if t.value and t.value > 0 }}">{{ '%+.0f%%'|format(t.value*100) if t.value is not none else '–' }}</td>

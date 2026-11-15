@@ -22,7 +22,7 @@ app.config.update(
 )
 init_db()
 
-MARKET_LABELS = {"1X2": "Győztes", "BTTS": "Mindkét csapat szerez gólt", "OU2.5": "Gólok (2.5)"}
+MARKET_LABELS = {"1X2": "Győztes", "BTTS": "Mindkét csapat szerez gólt", "OU2.5": "Gólok (2.5)", "CORNERS": "Szögletek"}
 PICK_LABELS = {
     "Home": "Hazai", "Draw": "Döntetlen", "Away": "Vendég",
     "Yes": "Igen", "No": "Nem", "Over 2.5": "Felett", "Under 2.5": "Alatt",
@@ -45,6 +45,14 @@ def hhmm(iso):
         return datetime.fromisoformat(iso).astimezone(TZ).strftime("%H:%M")
     except (TypeError, ValueError):
         return "--:--"
+
+
+@app.template_filter("pick_hu")
+def pick_hu(pick):
+    if pick in PICK_LABELS:
+        return PICK_LABELS[pick]
+    side, _, line = pick.partition(" ")
+    return f"{ {'Over': 'Felett', 'Under': 'Alatt'}.get(side, side) } {line}".strip()
 
 
 @app.template_filter("pct")
@@ -184,7 +192,16 @@ def history():
             if r["odds"]:
                 s["staked"] += 1
                 s["profit"] += (r["odds"] - 1) if r["result"] == "win" else -1
-    return render_template("history.html", rows=rows, stats=stats)
+    # Kalibráció: a megadott esély és a tényleges találati arány összevetése sávonként
+    bands = [(0.0, 0.5), (0.5, 0.55), (0.55, 0.6), (0.6, 0.65), (0.65, 0.7), (0.7, 1.01)]
+    calib = []
+    for lo, hi in bands:
+        sel = [r for r in rows if r["result"] in ("win", "loss") and lo <= r["prob"] < hi]
+        if sel:
+            calib.append({"label": f"{int(lo*100)}–{min(int(hi*100), 100)}%", "n": len(sel),
+                          "predicted": sum(r["prob"] for r in sel) / len(sel),
+                          "actual": sum(r["result"] == "win" for r in sel) / len(sel)})
+    return render_template("history.html", rows=rows, stats=stats, calib=calib)
 
 
 if __name__ == "__main__":

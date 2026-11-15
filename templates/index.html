@@ -20,7 +20,7 @@
     {% if ts %}
     <div class="meta">
       {% for m, t in ts.items() %}
-      <span class="chip {{ 'value' if t.value and t.value > 0 }}">{{ MARKET_LABELS[m] }}: <b>{{ PICK_LABELS[t.pick] }}</b> {{ t.prob|pct }}
+      <span class="chip {{ 'value' if t.value and t.value > 0 }}">{{ MARKET_LABELS[m] }}: <b>{{ t.pick|pick_hu }}</b> {{ t.prob|pct }}
         {% if t.result %}<span class="{{ t.result }}">· {{ RESULT_LABELS[t.result] }}</span>{% endif %}</span>
       {% endfor %}
     </div>
