@@ -22,8 +22,10 @@
     {% set o = odds.get(f.id) %}
     {% if o %}<div class="odds-line"><span class="od"><i>1</i><b>{{ o.get('Home','–') }}</b></span><span class="od"><i>X</i><b>{{ o.get('Draw','–') }}</b></span><span class="od"><i>2</i><b>{{ o.get('Away','–') }}</b></span></div>{% endif %}
     {% set ts = tips.get(f.id) %}
+    {% set dv = diverge.get(f.id) %}
     {% if ts %}
     <div class="meta">
+      {% if dv %}<span class="chip warn" title="Nagy eltérés ({{ dv.outcome }}): {% for name, v in dv['items'] %}{{ name }} {{ (v * 100)|round|int }}%{{ ', ' if not loop.last }}{% endfor %}">⚠ Eltérő vélemények</span>{% endif %}
       {% for m, t in ts.items() %}
       <span class="chip {{ 'value' if t.value and t.value > 0 }}" data-market="{{ m }}">{{ MARKET_LABELS[m] }}: <b>{{ t.pick|pick_hu }}</b> {{ t.prob|pct }}
         {% set mv = tip_moves.get((f.id, m)) %}{% if mv %}<span class="mv {{ 'dn' if mv.pct < 0 else 'up' }}" title="Szorzó: nyitó {{ '%.2f'|format(mv.open) }} → most {{ '%.2f'|format(mv.now) }}">{{ '▼' if mv.pct < 0 else '▲' }} {{ '%.2f'|format(mv.now) }}</span>{% endif %}

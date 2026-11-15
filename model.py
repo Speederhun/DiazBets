@@ -461,3 +461,40 @@ def apply_calibration(cal, market, p):
                 d = d0 + (d1 - d0) * ((p - x0) / (x1 - x0) if x1 > x0 else 0)
                 break
     return min(0.98, max(0.02, p + d))
+
+
+# ---------------------------------------------------------------- vélemények összevetése
+
+DIVERGE_PP = 0.15  # ennyi (15 százalékpont) eltérésnél jelez az app
+_OUT_HU = {"Home": "Hazai", "Draw": "Döntetlen", "Away": "Vendég"}
+
+
+def opinions(lam, api, odds):
+    """Három forrás 1X2 esélye: tiszta saját modell (a várható gólokból), az API-Football előrejelzése és a
+    szorzókból számolt piaci esély. Visszaad: [{key,label,p_home,p_draw,p_away}], ami létezik.
+    lam: (lam_h, lam_a) vagy None; api: {p_home,p_draw,p_away} vagy None; odds: {(market, sel): ár}."""
+    out = []
+    api = dict(api) if api else None
+    if lam and lam[0] is not None and lam[1] is not None:
+        p = probabilities(lam[0], lam[1])
+        out.append({"key": "model", "label": "Saját modell", "p_home": p["Home"], "p_draw": p["Draw"], "p_away": p["Away"]})
+    if api and all(api.get(k) is not None for k in ("p_home", "p_draw", "p_away")):
+        out.append({"key": "api", "label": "API-Football előrejelzés",
+                    "p_home": api["p_home"], "p_draw": api["p_draw"], "p_away": api["p_away"]})
+    mk = market_probs(odds or {})
+    if all(k in mk for k in ("Home", "Draw", "Away")):
+        out.append({"key": "market", "label": "Piac (szorzókból)", "p_home": mk["Home"], "p_draw": mk["Draw"], "p_away": mk["Away"]})
+    return out
+
+
+def divergence(ops, threshold=DIVERGE_PP):
+    """A legnagyobb eltérés a források közt; None, ha kevesebb mint két forrás van vagy nincs nagy eltérés."""
+    if len(ops) < 2:
+        return None
+    best = None
+    for k, name in (("p_home", "Home"), ("p_draw", "Draw"), ("p_away", "Away")):
+        vals = [(o["label"], o[k]) for o in ops]
+        spread = max(v for _, v in vals) - min(v for _, v in vals)
+        if spread >= threshold and (best is None or spread > best["spread"]):
+            best = {"outcome": _OUT_HU[name], "spread": spread, "items": vals}
+    return best

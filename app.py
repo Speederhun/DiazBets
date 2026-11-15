@@ -154,7 +154,21 @@ def index():
         "SELECT p.* FROM predictions p JOIN fixtures f ON f.id = p.fixture_id WHERE f.day = ?", (day,))}
     used = conn.execute("SELECT count FROM api_usage ORDER BY day DESC LIMIT 1").fetchone()
     moves = odds_moves(conn, [f["id"] for f in fixtures])
+    api_preds = {r["fixture_id"]: r for r in conn.execute(
+        "SELECT a.* FROM api_predictions a JOIN fixtures f ON f.id = a.fixture_id WHERE f.day = ?", (day,))}
     conn.close()
+    diverge = {}
+    for fid, pr in preds.items():
+        lam = (pr["lam_h"], pr["lam_a"]) if pr["lam_h"] is not None else None
+        o = odds.get(fid, {})
+        dv = model.divergence(model.opinions(lam, api_preds.get(fid), {("1X2", k): v for k, v in o.items()}))
+        if dv:
+            diverge[fid] = dv
+    for fid in api_preds:
+        if fid not in diverge and fid not in preds:
+            dv = model.divergence(model.opinions(None, api_preds[fid], {("1X2", k): v for k, v in odds.get(fid, {}).items()}))
+            if dv:
+                diverge[fid] = dv
     # a tippelt kimenet szorzómozgása, ha jelentős (>=4%)
     tip_moves = {}
     for fid, ts in tips.items():
@@ -165,7 +179,7 @@ def index():
     groups = {}
     for f in fixtures:
         groups.setdefault((f["league_id"], f["league_name"], f["country"]), []).append(f)
-    return render_template("index.html", day=day, groups=groups, tips=tips, odds=odds, preds=preds, tip_moves=tip_moves,
+    return render_template("index.html", day=day, groups=groups, tips=tips, odds=odds, preds=preds, tip_moves=tip_moves, diverge=diverge,
                            prev_day=_shift(day, -1), next_day=_shift(day, 1), api_used=used["count"] if used else 0, api_budget=DAILY_BUDGET)
 
 
@@ -213,7 +227,18 @@ def match(fid):
     heat = build_heatmap(pred["lam_h"], pred["lam_a"]) if pred and pred["lam_h"] is not None else None
     teams, _, _ = model.load_results_table(conn, f["day"])
     form = {tid: teams[tid] for tid in (f["home_id"], f["away_id"]) if tid in teams}
+    api = conn.execute("SELECT * FROM api_predictions WHERE fixture_id = ?", (fid,)).fetchone()
+    st = conn.execute("SELECT json FROM standings WHERE league_id = ? AND season = ?", (f["league_id"], f["season"])).fetchone()
     conn.close()
+    lam = (pred["lam_h"], pred["lam_a"]) if pred and pred["lam_h"] is not None else None
+    ops = model.opinions(lam, api, {("1X2", s["selection"]): s["price"] for s in odds.get("1X2", [])})
+    diverge = model.divergence(ops)
+    table, rank = None, {}
+    if st:
+        rows = json.loads(st["json"])
+        rank = {r["team_id"]: r for r in rows if r["team_id"] in (f["home_id"], f["away_id"])}
+        groups = {r["group"] for r in rank.values()}
+        table = [r for r in rows if not groups or r["group"] in groups] if groups else rows
     h2h_summary = None
     if h2h:
         hw = aw = dr = 0
@@ -229,7 +254,7 @@ def match(fid):
                 else:
                     aw += 1
         h2h_summary = {"home": hw, "draw": dr, "away": aw}
-    return render_template("match.html", f=f, tips=tips, odds=odds, moves=moves, injuries=injuries, pred=pred, heat=heat,
+    return render_template("match.html", f=f, tips=tips, odds=odds, moves=moves, injuries=injuries, pred=pred, heat=heat, ops=ops, diverge=diverge, api=api, table=table, rank=rank,
                            h2h=h2h, h2h_summary=h2h_summary, form=form)
 
 

@@ -83,6 +83,11 @@ CREATE INDEX IF NOT EXISTS idx_snap ON live_snapshots(fixture_id, ts);
 CREATE TABLE IF NOT EXISTS fetched_days (
     day TEXT PRIMARY KEY
 );
+CREATE TABLE IF NOT EXISTS api_predictions (
+    fixture_id INTEGER PRIMARY KEY,
+    p_home REAL, p_draw REAL, p_away REAL,
+    advice TEXT, winner TEXT, under_over TEXT, goals_h TEXT, goals_a TEXT
+);
 CREATE TABLE IF NOT EXISTS odds_history (
     fixture_id INTEGER NOT NULL,
     market TEXT NOT NULL,

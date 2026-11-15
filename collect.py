@@ -299,6 +299,10 @@ def collect(day=None):
 
             if not _safe(f"H2H {f['home']}–{f['away']}", get_h2h):
                 break  # ha az első is elutasítva, a többit se kérjük
+
+        if PRO:
+            _safe("API-előrejelzések", lambda: fetch_predictions(conn, client, ordered[:PER_FIXTURE_LIMIT]))
+            _safe("tabellák", lambda: fetch_standings(conn, client, ordered, day))
     except BudgetExceeded:
         log("Elfogyott a napi kéréskeret, a maradék kimarad.")
     except ApiError as e:
@@ -306,6 +310,72 @@ def collect(day=None):
     finally:
         generate_tips(conn, day)
         conn.close()
+
+
+def _pct(s):
+    try:
+        return float(str(s).strip().rstrip("%")) / 100
+    except (TypeError, ValueError):
+        return None
+
+
+def store_api_prediction(conn, fid, item):
+    p = item.get("predictions") or {}
+    pc = p.get("percent") or {}
+    goals = p.get("goals") or {}
+    win = (p.get("winner") or {})
+    conn.execute(
+        """INSERT OR REPLACE INTO api_predictions(fixture_id, p_home, p_draw, p_away, advice, winner, under_over, goals_h, goals_a)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (fid, _pct(pc.get("home")), _pct(pc.get("draw")), _pct(pc.get("away")), p.get("advice"),
+         win.get("name"), p.get("under_over"), goals.get("home"), goals.get("away")))
+    conn.commit()
+
+
+def fetch_predictions(conn, client, fixtures):
+    n = 0
+    for f in fixtures:
+        if conn.execute("SELECT 1 FROM api_predictions WHERE fixture_id=?", (f["id"],)).fetchone():
+            continue
+        resp = client.get("predictions", fixture=f["id"]).get("response") or []
+        if resp:
+            store_api_prediction(conn, f["id"], resp[0])
+            n += 1
+    log(f"  {n} API-előrejelzés letöltve")
+
+
+def compact_standings(data):
+    """Az API standings válaszából lapos, kis sorlista (csoportkörnél a csoport neve is benne van)."""
+    out = []
+    for r in model.flatten_standings(data):
+        al = r.get("all") or {}
+        g = al.get("goals") or {}
+        out.append({"rank": r.get("rank"), "team_id": r["team"]["id"], "team": r["team"]["name"],
+                    "points": r.get("points"), "played": al.get("played"), "win": al.get("win"),
+                    "draw": al.get("draw"), "lose": al.get("lose"), "gf": g.get("for"), "ga": g.get("against"),
+                    "gd": r.get("goalsDiff"), "group": r.get("group") or "", "form": r.get("form") or ""})
+    return out
+
+
+def fetch_standings(conn, client, fixtures, day):
+    n = 0
+    seen = set()
+    for f in fixtures:
+        key = (f["league_id"], f["season"])
+        if key in seen or not f["season"]:
+            continue
+        seen.add(key)
+        row = conn.execute("SELECT fetched_day FROM standings WHERE league_id=? AND season=?", key).fetchone()
+        if row and row["fetched_day"] == day:
+            continue
+        data = client.get("standings", league=key[0], season=key[1])
+        rows = compact_standings(data)
+        if rows:
+            conn.execute("INSERT OR REPLACE INTO standings(league_id, season, fetched_day, json) VALUES (?,?,?,?)",
+                         (key[0], key[1], day, json.dumps(rows)))
+            conn.commit()
+            n += 1
+    log(f"  {n} tabella frissítve")
 
 
 def refresh_odds(day=None):

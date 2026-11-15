@@ -398,3 +398,48 @@ def test_generate_tips_stores_raw_prob_and_pages_show_new_sections():
     assert "Ligák szerint" in c.get("/history").get_data(as_text=True)
     page = c.get("/match/9001").get_data(as_text=True)
     assert "2.40 → 1.90" in page
+
+
+def test_opinions_divergence():
+    ops = model.opinions((2.2, 0.8), {"p_home": 0.35, "p_draw": 0.30, "p_away": 0.35},
+                         {("1X2", "Home"): 1.6, ("1X2", "Draw"): 4.0, ("1X2", "Away"): 5.5})
+    assert [o["key"] for o in ops] == ["model", "api", "market"]
+    dv = model.divergence(ops)
+    assert dv and dv["outcome"] in ("Hazai", "Vendég") and dv["spread"] >= 0.15
+    agree = model.opinions(None, {"p_home": 0.5, "p_draw": 0.25, "p_away": 0.25},
+                           {("1X2", "Home"): 2.0, ("1X2", "Draw"): 4.0, ("1X2", "Away"): 4.0})
+    assert model.divergence(agree) is None
+    assert model.divergence(ops[:1]) is None  # egy forrás nem hasonlítható össze
+
+
+def test_api_prediction_and_standings_storage_and_match_page():
+    from db import connect
+    conn = connect()
+    collect.store_api_prediction(conn, 9001, {"predictions": {
+        "winner": {"id": 4, "name": "Teszt Rovers"}, "advice": "Double chance Teszt Rovers or draw",
+        "under_over": "-3.5", "goals": {"home": "-1.5", "away": "-2.5"},
+        "percent": {"home": "10%", "draw": "20%", "away": "70%"}}})
+    row = conn.execute("SELECT * FROM api_predictions WHERE fixture_id=9001").fetchone()
+    assert abs(row["p_away"] - 0.7) < 1e-9 and row["winner"] == "Teszt Rovers"
+
+    class SC:
+        n = 0
+        def get(self, path, **p):
+            SC.n += 1
+            return {"response": [{"league": {"standings": [[
+                {"rank": 1, "team": {"id": 1, "name": "Demo FC"}, "points": 30, "goalsDiff": 12, "group": "Liga",
+                 "all": {"played": 12, "win": 9, "draw": 3, "lose": 0, "goals": {"for": 25, "against": 13}}, "form": "WWDWW"},
+                {"rank": 2, "team": {"id": 4, "name": "Teszt Rovers"}, "points": 20, "goalsDiff": 1, "group": "Liga",
+                 "all": {"played": 12, "win": 6, "draw": 2, "lose": 4, "goals": {"for": 15, "against": 14}}, "form": "LWWLD"}]]}}]}
+    f = conn.execute("SELECT * FROM fixtures WHERE id=9001").fetchone()
+    collect.fetch_standings(conn, SC(), [f], "2026-11-15")
+    collect.fetch_standings(conn, SC(), [f], "2026-11-15")   # ugyanazon a napon nem kér újra
+    assert SC.n == 1
+    conn.close()
+    from app import app
+    c = app.test_client()
+    c.post("/login", data={"username": "teszt", "password": "jelszo1234"})
+    page = c.get("/match/9001").get_data(as_text=True)
+    assert "Vélemények összevetése" in page and "API-Football előrejelzés" in page
+    assert "Tabella" in page and "1. hely" in page and "30 pont" in page
+    assert "Eltérő vélemények" in c.get("/?d=" + f["day"]).get_data(as_text=True)

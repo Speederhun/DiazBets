@@ -238,3 +238,13 @@ details.tbl table{margin-top:6px}
 .lg-table .lg-head td{border-top:1px solid var(--line, #30363d);padding-top:10px}
 .lg-table .lg-sub td:first-child{padding-left:22px;color:var(--mut)}
 .lg-table .lg-sub.few{opacity:.55}
+
+.opinions .op{margin-bottom:14px}
+.opinions .op-label{font-size:12px;color:var(--mut);margin-bottom:2px}
+.opinions .pbar.compact .pbar-legend em{display:inline}
+.diverge{margin-top:4px;padding:8px 10px;border:1px solid #eda10066;border-radius:8px;background:#eda10012;font-size:13px}
+.diverge .note{display:block;margin-top:2px}
+.chip.warn{color:#eda100;border-color:#eda10066}
+.rank{display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;background:rgba(255,255,255,.06);font-size:12px;color:var(--txt)}
+.standings .st-scroll{max-height:380px;overflow:auto}
+.standings tr.me td{background:rgba(57,135,229,.14);font-weight:600}
