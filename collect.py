@@ -11,6 +11,7 @@ Használat:
 """
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime, timedelta
@@ -61,6 +62,28 @@ def log(msg):
 
 # ---------------------------------------------------------------- gyűjtés
 
+# Ifjúsági és női válogatottak (U17/U19/U20/U21/U23, "W", "Women"): nem kellenek a modellbe és a listára
+YOUTH_RE = re.compile(r"(\bU-?\d{2}\b|\bW$|\bWomen\b)", re.IGNORECASE)
+
+
+def is_youth_or_women(*names):
+    return any(YOUTH_RE.search(n or "") for n in names)
+
+
+def purge_youth(conn):
+    """A már eltárolt ifjúsági/női meccsek törlése (a barátságos meccsek ligájából jöttek) a hozzájuk tartozó adatokkal együtt."""
+    ids = [r["id"] for r in conn.execute("SELECT id, home, away FROM fixtures WHERE league_id = 10").fetchall()
+           if is_youth_or_women(r["home"], r["away"])]
+    for fid in ids:
+        for table in ("fixture_stats", "odds", "odds_sharp", "odds_history", "injuries", "h2h", "predictions",
+                      "api_predictions", "live_snapshots", "tips"):
+            col = "fixture_id"
+            conn.execute(f"DELETE FROM {table} WHERE {col} = ?", (fid,))
+        conn.execute("DELETE FROM fixtures WHERE id = ?", (fid,))
+    conn.commit()
+    return len(ids)
+
+
 def store_fixtures(conn, items, day):
     wanted = {lid for lid, _ in LEAGUES}
     n = 0
@@ -79,6 +102,8 @@ def store_fixtures(conn, items, day):
         if lg["id"] not in wanted:
             continue
         fx, t, g = it["fixture"], it["teams"], it["goals"]
+        if is_youth_or_women(t["home"]["name"], t["away"]["name"]):
+            continue
         conn.execute(
             """INSERT INTO fixtures(id, day, kickoff, league_id, league_name, country, season,
                    home_id, home, home_logo, away_id, away, away_logo, status, home_goals, away_goals)
@@ -262,6 +287,9 @@ def collect(day=None):
     conn = connect()
     day = day or today()
     client = Client(conn)
+    purged = purge_youth(conn)
+    if purged:
+        log(f"{purged} ifjúsági/női meccs törölve az adatbázisból")
     try:
         data = client.get("fixtures", date=day, timezone="Europe/Budapest")
         n = store_fixtures(conn, data.get("response", []), day)

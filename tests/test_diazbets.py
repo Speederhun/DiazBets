@@ -542,3 +542,26 @@ def test_elo_ratings_and_probs():
     assert model.elo_weight(0.1, 3) == 0.0 and model.elo_weight(0.1, 5) > model.elo_weight(0.1, 30) == 0.1
     ops = model.opinions((1.4, 1.4), None, {}, None, p)
     assert [o["key"] for o in ops] == ["model", "elo"]
+
+
+def test_youth_and_women_friendlies_are_filtered():
+    assert collect.is_youth_or_women("France U20", "Denmark U20")
+    assert collect.is_youth_or_women("Scotland U21", "USA U21") and collect.is_youth_or_women("Germany W", "Spain")
+    assert collect.is_youth_or_women("Brazil Women", "Chile") and collect.is_youth_or_women("Italy U-19", "X")
+    assert not collect.is_youth_or_women("New Zealand", "India") and not collect.is_youth_or_women("Cyprus", "Montenegro")
+    assert not collect.is_youth_or_women("Houston Dynamo", "Wuhan")        # nem szó végi W / nem U-szám
+    from db import connect, init_db
+    init_db()
+    conn = connect()
+    item = lambda fid, h, a: {"fixture": {"id": fid, "date": "2026-11-15T15:00:00+01:00", "status": {"short": "NS"}},
+                              "league": {"id": 10, "name": "Friendlies", "country": "World", "season": 2026},
+                              "teams": {"home": {"id": fid * 10, "name": h, "logo": None}, "away": {"id": fid * 10 + 1, "name": a, "logo": None}},
+                              "goals": {"home": None, "away": None}}
+    assert collect.store_fixtures(conn, [item(6400, "France U20", "Denmark U20"), item(6401, "Kyrgyzstan", "Vietnam")], "2026-11-15") == 1
+    conn.execute("""INSERT OR REPLACE INTO fixtures(id, day, kickoff, league_id, season, home_id, home, away_id, away, status)
+                    VALUES (6402,'2026-11-15','2026-11-15T15:00:00+01:00',10,2026,64020,'Italy U21',64021,'Spain U21','NS')""")
+    conn.commit()
+    assert collect.purge_youth(conn) == 1
+    assert conn.execute("SELECT COUNT(*) FROM fixtures WHERE id IN (6400, 6402)").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM fixtures WHERE id = 6401").fetchone()[0] == 1
+    conn.close()
