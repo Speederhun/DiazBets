@@ -109,3 +109,20 @@ def build_tips(probs, odds, lam_h, lam_a):
 def _tip(market, pick, prob, price, note):
     value = (prob * price - 1) if price else None
     return {"market": market, "pick": pick, "prob": prob, "odds": price, "value": value, "note": note}
+
+
+def tips_from_odds(odds):
+    """Tartalék: a szorzókból, a fogadóiroda árrésének levonásával számolt esélyek. Érték nincs, mert nincs saját becslés."""
+    note = "Tabella-adat híján a tipp a szorzókból számolt esélyen alapul (nincs saját becslés)."
+    tips = []
+    for market, sels in (("1X2", ("Home", "Draw", "Away")), ("BTTS", ("Yes", "No")),
+                         ("OU2.5", ("Over 2.5", "Under 2.5"))):
+        prices = [odds.get((market, s)) for s in sels]
+        if not all(prices):
+            continue
+        inv = [1 / p for p in prices]
+        total = sum(inv)
+        best = max(range(len(sels)), key=lambda i: inv[i])
+        tips.append({"market": market, "pick": sels[best], "prob": inv[best] / total,
+                     "odds": prices[best], "value": None, "note": note})
+    return tips

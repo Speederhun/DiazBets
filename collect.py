@@ -144,6 +144,17 @@ def fetch_paged(client, path, **params):
         page += 1
 
 
+def _safe(label, fn):
+    """Egy lépés hibája ne állítsa le a többit. A keret elfogyása viszont mindent leállít."""
+    try:
+        fn()
+        log(f"{label}: kész")
+    except BudgetExceeded:
+        raise
+    except Exception as e:  # noqa: BLE001 - a pontos okot ki akarjuk írni a naplóba
+        log(f"{label}: HIBA – {type(e).__name__}: {e}")
+
+
 def collect(day=None):
     init_db()
     conn = connect()
@@ -159,33 +170,49 @@ def collect(day=None):
         league_ids = sorted({f["league_id"] for f in fixtures}, key=lambda l: LEAGUE_ORDER.get(l, 99))
         seasons = {f["league_id"]: f["season"] for f in fixtures}
 
-        # 1) tabella (modellhez) – ligánként, naponta egyszer
         for lid in league_ids:
-            have = conn.execute("SELECT 1 FROM standings WHERE league_id=? AND season=? AND fetched_day=?",
-                                (lid, seasons[lid], day)).fetchone()
-            if have:
-                continue
-            d = client.get("standings", league=lid, season=seasons[lid])
-            conn.execute("INSERT OR REPLACE INTO standings(league_id, season, fetched_day, json) VALUES (?,?,?,?)",
-                         (lid, seasons[lid], day, json.dumps(d)))
-            conn.commit()
-        log("tabellák kész")
+            name = dict(LEAGUES).get(lid, str(lid))
+            season = seasons[lid]
 
-        # 2) szorzók és sérültek ligánként
-        for lid in league_ids:
-            store_odds(conn, fetch_paged(client, "odds", league=lid, season=seasons[lid],
-                                         date=day, bookmaker=BOOKMAKER))
-            store_injuries(conn, fetch_paged(client, "injuries", league=lid, season=seasons[lid], date=day))
-        log("szorzók és sérültek kész")
+            def get_standings(lid=lid, season=season):
+                have = conn.execute("SELECT 1 FROM standings WHERE league_id=? AND season=? AND fetched_day=?",
+                                    (lid, season, day)).fetchone()
+                if have:
+                    return
+                d = client.get("standings", league=lid, season=season)
+                if not d.get("response"):
+                    raise ApiError("a tabella üres (az API nem ad tabellát ehhez a ligához/szezonhoz)")
+                conn.execute("INSERT OR REPLACE INTO standings(league_id, season, fetched_day, json) VALUES (?,?,?,?)",
+                             (lid, season, day, json.dumps(d)))
+                conn.commit()
 
-        # 3) egymás elleni meccsek (a legfontosabb ligák elsőként)
+            def get_odds(lid=lid, season=season):
+                items = fetch_paged(client, "odds", league=lid, season=season, date=day, bookmaker=BOOKMAKER)
+                if not items:
+                    # Bet365 nélkül próbáljuk bármelyik fogadóirodával
+                    items = fetch_paged(client, "odds", league=lid, season=season, date=day)
+                log(f"  {name}: {len(items)} meccshez van szorzó")
+                store_odds(conn, items)
+
+            def get_injuries(lid=lid, season=season):
+                items = fetch_paged(client, "injuries", league=lid, season=season, date=day)
+                log(f"  {name}: {len(items)} sérült/eltiltott")
+                store_injuries(conn, items)
+
+            _safe(f"{name} tabella", get_standings)
+            _safe(f"{name} szorzók", get_odds)
+            _safe(f"{name} sérültek", get_injuries)
+
         ordered = sorted(fixtures, key=lambda f: LEAGUE_ORDER.get(f["league_id"], 99))
         for f in ordered:
             if conn.execute("SELECT 1 FROM h2h WHERE fixture_id=?", (f["id"],)).fetchone():
                 continue
-            d = client.get("fixtures/headtohead", h2h=f"{f['home_id']}-{f['away_id']}", last=5)
-            store_h2h(conn, f["id"], d.get("response", []))
-        log("H2H kész")
+
+            def get_h2h(f=f):
+                d = client.get("fixtures/headtohead", h2h=f"{f['home_id']}-{f['away_id']}", last=5)
+                store_h2h(conn, f["id"], d.get("response", []))
+
+            _safe(f"H2H {f['home']}–{f['away']}", get_h2h)
     except BudgetExceeded:
         log("Elfogyott a napi kéréskeret, a maradék kimarad.")
     except ApiError as e:
@@ -214,14 +241,18 @@ def generate_tips(conn, day):
             else:
                 rows = model.flatten_standings(json.loads(row["json"]))
                 tables[key] = model.team_table(rows)
-        if not tables[key]:
-            continue
-        teams, avg_h, avg_a = tables[key]
-        xg = model.expected_goals(teams, avg_h, avg_a, f["home_id"], f["away_id"])
-        if not xg:
-            continue  # pl. kieséses szakasz: nincs tabella-adat
-        probs = model.probabilities(*xg)
-        for t in model.build_tips(probs, load_odds(conn, f["id"]), *xg):
+        odds = load_odds(conn, f["id"])
+        xg = None
+        if tables[key]:
+            teams, avg_h, avg_a = tables[key]
+            xg = model.expected_goals(teams, avg_h, avg_a, f["home_id"], f["away_id"])
+        if xg:
+            probs = model.probabilities(*xg)
+            new_tips = model.build_tips(probs, odds, *xg)
+        else:
+            # Nincs tabella-adat (pl. kieséses szakasz, új liga): szorzó alapú tartalék tipp
+            new_tips = model.tips_from_odds(odds)
+        for t in new_tips:
             conn.execute(
                 """INSERT INTO tips(fixture_id, market, pick, prob, odds, value, note)
                    VALUES (?,?,?,?,?,?,?)

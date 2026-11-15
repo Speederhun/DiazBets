@@ -71,3 +71,13 @@ def test_demo_and_web_flow():
     assert c.get("/match/1").status_code == 404
     assert c.get("/?d=nem-datum").status_code == 400
     assert c.post("/login?next=//evil.example", data={"username": "teszt", "password": "jelszo1234"}).headers["Location"] == "/"
+
+
+def test_tips_from_odds_fallback():
+    odds = {("1X2", "Home"): 1.5, ("1X2", "Draw"): 4.0, ("1X2", "Away"): 7.0,
+            ("BTTS", "Yes"): 1.9, ("BTTS", "No"): 1.9}
+    tips = {x["market"]: x for x in model.tips_from_odds(odds)}
+    assert tips["1X2"]["pick"] == "Home" and 0.5 < tips["1X2"]["prob"] < 0.7
+    assert tips["1X2"]["value"] is None
+    assert "OU2.5" not in tips  # nincs hozzá szorzó
+    assert model.tips_from_odds({}) == []
