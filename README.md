@@ -93,3 +93,4 @@ Az éjszakai `settle` a friss meccsek szögletstatisztikáját magától letölt
 - **Hazai/idegen erő és forma:** külön hazai és idegenbeli erő, kevés pályaadatnál a csapat összesített teljesítménye felé húzva; az idősebb meccsek súlya 70 naponként felére csökken.
 - **Szorzómozgás:** `python collect.py odds` frissíti a szorzókat és eltárolja a változásokat (`odds_history`). A listán és a meccsoldalon nyíl jelzi az elmozdulást.
 - **Ligák szerint:** az Előzmények oldalon bajnokságonként és piaconként a találati arány és a profit.
+- **API-előrejelzés a vegyítésben:** az 1X2 esélybe az API-Football előrejelzése is beleszámít (alap súly 15%, kevés meccsű csapatnál akár ~40%). Kikapcsolás: `DIAZBETS_API_WEIGHT=0`.

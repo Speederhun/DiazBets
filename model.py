@@ -350,6 +350,31 @@ def blend(probs, odds, w):
     return out
 
 
+def api_weight(base, games):
+    """Az API-Football előrejelzésének súlya: alapból kicsi, kevés meccsű csapatnál (ahol a saját modell vak) nagyobb, max. kb. base+0.25."""
+    shortfall = max(0.0, 1 - games / 15)
+    return min(0.6, base + 0.25 * shortfall)
+
+
+def blend_api(probs, api, wa):
+    """A (modell+piac) 1X2 esélyeit az API-Football százalékaival vegyíti. api: {p_home,p_draw,p_away}."""
+    if not wa or not api:
+        return probs
+    api = dict(api)
+    if any(api.get(k) is None for k in ("p_home", "p_draw", "p_away")):
+        return probs
+    tot = api["p_home"] + api["p_draw"] + api["p_away"]
+    if tot <= 0:
+        return probs
+    out = dict(probs)
+    for k, name in (("p_home", "Home"), ("p_draw", "Draw"), ("p_away", "Away")):
+        out[name] = (1 - wa) * probs[name] + wa * api[k] / tot
+    s = out["Home"] + out["Draw"] + out["Away"]
+    for name in ("Home", "Draw", "Away"):
+        out[name] /= s
+    return out
+
+
 def adaptive_weight(base, games):
     """Kevés meccses csapatoknál a piac súlya nő: 15 meccsnél már az alap, 0-nál 1 felé tart."""
     shortfall = max(0.0, 1 - games / 15)

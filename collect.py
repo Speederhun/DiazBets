@@ -471,6 +471,7 @@ def generate_tips(conn, day):
     teams, avg_h, avg_a = model.load_results_table(conn, day)
     cal = load_calibration(conn) if os.environ.get("DIAZBETS_CALIBRATE", "1") != "0" else {}
     adjust = os.environ.get("DIAZBETS_ADJUST", "1") != "0"
+    api_base = float(os.environ.get("DIAZBETS_API_WEIGHT", "0.15"))  # 0 = az API előrejelzése nem számít bele
     corner_rows = conn.execute(
         """SELECT f.home_id, f.away_id, sh.corners AS hc, sa.corners AS ac
            FROM fixtures f
@@ -498,12 +499,22 @@ def generate_tips(conn, day):
         if xg:
             w = model.adaptive_weight(weight, model.min_games(teams, f["home_id"], f["away_id"]))
             probs = model.blend(model.probabilities(*xg), odds, w)
+            api = conn.execute("SELECT * FROM api_predictions WHERE fixture_id=?", (f["id"],)).fetchone()
+            wa = 0.0
+            if api and api_base > 0:
+                games = model.min_games(teams, f["home_id"], f["away_id"])
+                wa = model.api_weight(api_base, games)
+                probs = model.blend_api(probs, api, wa)
             new_tips = model.build_tips(probs, odds, *xg)
             conn.execute("INSERT OR REPLACE INTO predictions(fixture_id, p_home, p_draw, p_away, lam_h, lam_a) VALUES (?,?,?,?,?,?)",
                          (f["id"], probs["Home"], probs["Draw"], probs["Away"], xg[0], xg[1]))
             if w and model.market_probs(odds):
                 for t in new_tips:
                     t["note"] += f" A tipp a saját modell és a szorzók átlaga (piac súlya {w:.0%}, kevés meccsnél nagyobb)."
+            if wa:
+                for t in new_tips:
+                    if t["market"] == "1X2":
+                        t["note"] += f" Az 1X2 esélyben az API-Football előrejelzése is benne van ({wa:.0%} súllyal)."
         else:
             # Kevés saját adat: szorzó alapú tartalék tipp (ha van szorzó)
             new_tips = model.tips_from_odds(odds)

@@ -25,7 +25,7 @@
 </section>
 
 {% if pred %}
-<h2>Esélyek <span class="h2-sub">modell és piac vegyítve</span> <span class="live-tag" id="prob-live" hidden>élő állás szerint</span></h2>
+<h2>Esélyek <span class="h2-sub">modell, piac és API vegyítve</span> <span class="live-tag" id="prob-live" hidden>élő állás szerint</span></h2>
 <div class="card pad" id="prob-card" data-pred="1">{{ pbar(pred, 'big') }}</div>
 {% endif %}
 
@@ -68,7 +68,7 @@
   {% for o in ops %}
   <div class="op"><div class="op-label">{{ o.label }}{% if o.key == "model" %} <span class="note">· tisztán a saját számítás, a piac nélkül</span>{% endif %}</div>{{ pbar(o, 'compact') }}</div>
   {% endfor %}
-  <div class="note">A felső „Esélyek” sáv és a tippek a saját modell és a piac súlyozott átlagát használják (kevés meccsű csapatnál nagyobb piaci súllyal), ezért az nem egyezik a tiszta modellel.</div>
+  <div class="note">A felső „Esélyek” sáv és a tippek a három forrás súlyozott átlagát használják. Kevés meccsű csapatnál a saját modell súlya kicsi, a piacé és az API-é nagyobb, ezért a sáv nem egyezik a tiszta modellel.</div>
   {% if diverge %}
   <div class="diverge">⚠ <b>Nagy eltérés ({{ diverge.outcome }}):</b>
     {% for name, v in diverge['items'] %}{{ name }} {{ (v * 100)|round|int }}%{{ ' · ' if not loop.last }}{% endfor %}

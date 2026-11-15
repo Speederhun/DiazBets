@@ -443,3 +443,15 @@ def test_api_prediction_and_standings_storage_and_match_page():
     assert "Vélemények összevetése" in page and "API-Football előrejelzés" in page
     assert "Tabella" in page and "1. hely" in page and "30 pont" in page
     assert "Eltérő vélemények" in c.get("/?d=" + f["day"]).get_data(as_text=True)
+
+
+def test_api_blend_pulls_toward_api_when_data_is_scarce():
+    probs = {"Home": 0.6, "Draw": 0.2, "Away": 0.2, "BTTS": 0.5, "Over25": 0.5}
+    api = {"p_home": 0.1, "p_draw": 0.2, "p_away": 0.7}
+    assert model.api_weight(0.15, 30) == 0.15
+    assert model.api_weight(0.15, 5) > 0.15 and model.api_weight(0.15, 0) <= 0.6
+    out = model.blend_api(probs, api, 0.3)
+    assert out["Home"] < 0.6 and out["Away"] > 0.2 and abs(out["Home"] + out["Draw"] + out["Away"] - 1) < 1e-9
+    assert out["BTTS"] == 0.5                       # csak az 1X2-t érinti
+    assert model.blend_api(probs, None, 0.3) == probs
+    assert model.blend_api(probs, {"p_home": None, "p_draw": None, "p_away": None}, 0.3) == probs
