@@ -176,3 +176,20 @@ def test_settle_corners_and_stats_storage():
     collect.settle_local(conn)
     assert conn.execute("SELECT result FROM tips WHERE fixture_id=5001").fetchone()["result"] == "win"
     conn.close()
+
+
+def test_fetch_paged_without_page_param():
+    class C:
+        def __init__(self): self.calls = []
+        def get(self, path, **p):
+            self.calls.append(p)
+            if "page" in p:
+                raise AssertionError("page nem küldhető")
+            return {"response": [1, 2], "paging": {"current": 1, "total": 3}}
+    c = C()
+    assert collect.fetch_paged(c, "injuries", paged=False, date="2026-01-01") == [1, 2]
+    assert len(c.calls) == 1
+
+
+def test_reserve_never_exceeds_budget():
+    assert collect.RESERVE <= collect.DAILY_BUDGET // 4

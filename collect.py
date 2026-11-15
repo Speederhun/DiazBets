@@ -38,7 +38,7 @@ LEAGUE_ORDER = {lid: i for i, (lid, _) in enumerate(LEAGUES)}
 
 BOOKMAKER = 8  # Bet365
 PER_FIXTURE_LIMIT = 60 if PRO else 12   # meccsenkénti tartalék lekérések száma
-RESERVE = 500 if PRO else 25            # a visszatöltés/statisztika ennyi kérést mindig meghagy
+RESERVE = min(500 if PRO else 25, DAILY_BUDGET // 4)  # a visszatöltés/statisztika ennyi kérést mindig meghagy
 BET_IDS = {1: "1X2", 8: "BTTS", 5: "OU", 45: "CORNERS"}
 FINISHED = {"FT", "AET", "PEN"}
 
@@ -150,13 +150,14 @@ def store_h2h(conn, fixture_id, items):
     conn.commit()
 
 
-def fetch_paged(client, path, max_pages=8, **params):
+def fetch_paged(client, path, max_pages=8, paged=True, **params):
     out, page = [], 1
     while True:
-        data = client.get(path, page=page, **params)
+        # Egyes végpontok (pl. injuries) nem ismerik a page paramétert
+        data = client.get(path, page=page, **params) if paged else client.get(path, **params)
         out.extend(data.get("response", []))
         paging = data.get("paging") or {}
-        if page >= paging.get("total", 1) or page >= max_pages:
+        if not paged or page >= paging.get("total", 1) or page >= max_pages:
             return out
         page += 1
 
@@ -265,7 +266,7 @@ def collect(day=None):
             _safe("szorzók (meccsenként)", odds_by_fixture)
 
         def injuries_by_date():
-            items = fetch_paged(client, "injuries", date=day)
+            items = fetch_paged(client, "injuries", paged=False, date=day)
             log(f"  {len(items)} sérült/eltiltott (dátum szerint)")
             store_injuries(conn, items)
 
