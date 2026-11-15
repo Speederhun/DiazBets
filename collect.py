@@ -4,6 +4,7 @@ Használat:
     python collect.py collect [YYYY-MM-DD]   # meccsek, szorzók, sérültek, H2H, tippek
     python collect.py settle                 # tegnapi és mai eredmények, tippek elszámolása
     python collect.py stats [db]             # szögletstatisztika letöltése a lejátszott meccsekhez (Pro)
+    python collect.py rebackfill [napok]     # új liga felvétele után az utolsó N nap újratöltése (alap: 150)
     python collect.py backfill [napok]       # múltbeli eredmények letöltése a modellhez (alap: 45 nap)
     python collect.py odds [YYYY-MM-DD]      # csak a szorzók frissítése (mozgáskövetés), tippek újraszámolása
 """
@@ -35,6 +36,9 @@ LEAGUES = [
     (88, "Eredivisie"),
     (94, "Primeira Liga"),
     (40, "Championship"),
+    (32, "VB-selejtező (Európa)"),
+    (960, "Eb-selejtező"),
+    (10, "Barátságos (válogatott)"),
 ]
 LEAGUE_ORDER = {lid: i for i, (lid, _) in enumerate(LEAGUES)}
 
@@ -630,6 +634,16 @@ if __name__ == "__main__":
         settle()
     elif cmd == "stats":
         stats_cmd(int(sys.argv[2]) if len(sys.argv) > 2 else 500)
+    elif cmd == "rebackfill":
+        # új liga felvétele után: az utolsó N nap meccslistáját újra letölti (naponta 1 kérés)
+        n = int(sys.argv[2]) if len(sys.argv) > 2 else 150
+        init_db()
+        _c = connect()
+        _cut = (datetime.now(TZ) - timedelta(days=n + 1)).strftime("%Y-%m-%d")
+        _c.execute("DELETE FROM fetched_days WHERE day >= ?", (_cut,))
+        _c.commit()
+        _c.close()
+        backfill(n)
     elif cmd == "backfill":
         backfill(int(sys.argv[2]) if len(sys.argv) > 2 else 45)
     else:
