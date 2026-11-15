@@ -17,6 +17,7 @@ TZ = ZoneInfo("Europe/Budapest")
 
 # API-Football liga ID-k, fontossági sorrendben (ha elfogy a keret, a sor végéről maradnak ki)
 LEAGUES = [
+    (5, "Nemzetek Ligája"),
     (2, "Bajnokok Ligája"),
     (3, "Európa-liga"),
     (39, "Premier League"),
@@ -50,6 +51,16 @@ def log(msg):
 def store_fixtures(conn, items, day):
     wanted = {lid for lid, _ in LEAGUES}
     n = 0
+    skipped = {}
+    for it in items:
+        if it["league"]["id"] not in wanted:
+            key = f'{it["league"]["id"]} {it["league"]["name"]}'
+            skipped[key] = skipped.get(key, 0) + 1
+    if skipped:
+        top = sorted(skipped.items(), key=lambda kv: -kv[1])[:8]
+        log(f"Az API {len(items)} meccset adott; nem figyelt ligák: " + "; ".join(f"{k} ({v})" for k, v in top))
+    else:
+        log(f"Az API {len(items)} meccset adott")
     for it in items:
         lg = it["league"]
         if lg["id"] not in wanted:
