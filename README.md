@@ -61,6 +61,8 @@ ezért a keretet alig terheli. A befejezett meccsek tippjeit azonnal elszámolja
 
 ## Pro csomag (API-Football Pro, 7500 kérés/nap)
 
+A böngészőből „Telepítés" (PWA) is elérhető: a `static/manifest.webmanifest`, az ikonok és a `/sw.js` (átengedő service worker, nem tárol adatot) adják.
+
 Az `.env`-ben legyen `DIAZBETS_PLAN=pro`. Ilyenkor a keret 7300 kérés/nap (a valódi korlát 7500; az élő oldal a teljes keretet használhatja, a gyűjtés korábban megáll), és a lekérések gyorsak.
 
 Első beállítás (egyszer, a gyűjtés előtt):

@@ -108,6 +108,18 @@ def build_heatmap(lam_h, lam_a, n=6):
     return {"rows": rows, "top": top, "coverage": sum(sum(r) for r in mat)}
 
 
+@app.route("/sw.js")
+def service_worker():
+    """Átengedő service worker (nem tárol semmit, így nem ragad be elavult élő adat); a telepíthetőséghez kell.
+    A gyökérből kell kiszolgálni, hogy az egész oldalra érvényes legyen."""
+    resp = app.response_class("self.addEventListener('install', function () { self.skipWaiting(); });\n"
+                              "self.addEventListener('activate', function (e) { e.waitUntil(self.clients.claim()); });\n"
+                              "self.addEventListener('fetch', function () {});\n",
+                              mimetype="application/javascript")
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     error = None

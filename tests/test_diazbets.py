@@ -612,3 +612,21 @@ def test_list_layout_collapsible_leagues_and_live_page():
     assert "Livehaz" in body and "La Liga" in body            # a most zajló meccs ligájával együtt
     assert "Élő és közelgő meccsek" in body
     assert c.get("/static/layout.js").status_code == 200
+
+
+def test_pwa_installable_without_login():
+    import json as _json
+    from app import app
+    c = app.test_client()           # belépés nélkül is elérhetők kell legyenek
+    m = c.get("/static/manifest.webmanifest")
+    assert m.status_code == 200
+    data = _json.loads(m.get_data(as_text=True))
+    assert data["display"] == "standalone" and data["start_url"] == "/"
+    sizes = {i["sizes"] for i in data["icons"]}
+    assert {"192x192", "512x512"} <= sizes
+    for icon in data["icons"]:
+        assert c.get(icon["src"]).status_code == 200
+    sw = c.get("/sw.js")
+    assert sw.status_code == 200 and "javascript" in sw.mimetype and b"fetch" in sw.data
+    login = c.get("/login").get_data(as_text=True)
+    assert 'rel="manifest"' in login and "serviceWorker" in login

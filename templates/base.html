@@ -3,6 +3,12 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{% block title %}DiazBets{% endblock %}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
+<meta name="theme-color" content="#0f1419">
+<link rel="icon" href="{{ url_for('static', filename='icons/icon-192.png') }}" type="image/png">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 </head><body data-page="{% block page %}{% endblock %}">
 {% if session.uid %}
 <header>
@@ -22,4 +28,5 @@
 <script src="{{ url_for('static', filename='charts.js') }}" defer></script>
 <script src="{{ url_for('static', filename='layout.js') }}" defer></script>
 <script src="{{ url_for('static', filename='live.js') }}" defer></script>
+<script>if ("serviceWorker" in navigator) { window.addEventListener("load", function () { navigator.serviceWorker.register("/sw.js").catch(function () {}); }); }</script>
 </body></html>
