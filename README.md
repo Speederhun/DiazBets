@@ -84,3 +84,12 @@ Az éjszakai `settle` a friss meccsek szögletstatisztikáját magától letölt
 - Napi 100 kérés, percenként 10 (`DIAZBETS_PLAN=free`).
 - A szöglet-statisztika letöltése meccsenként 1 kérés, ingyen nem praktikus.
 - Kevés saját adatú csapatoknál (kevesebb mint 3 meccs) szorzó alapú tartalék tipp készül.
+
+
+## Önjavító modell és finomítások
+
+- **Kalibráció:** a lezárt tippek alapján piaconként tanulja, mennyire túl- vagy alulbiztos a modell, és ennyivel igazítja az új tippek esélyét (legalább 60 elszámolt tipp kell hozzá, kevés mintánál erősen visszafogott). A nyers modell-esély külön (`tips.raw_prob`) megmarad, hogy a tanulás ne hajtson végtelen kört. Kikapcsolás: `DIAZBETS_CALIBRATE=0`.
+- **Fáradtság és hiányzók:** kevés pihenőnap (<=4) és sok hiányzó kis, plafonozott korrekciót ad a várható gólokra. Kikapcsolás: `DIAZBETS_ADJUST=0`.
+- **Hazai/idegen erő és forma:** külön hazai és idegenbeli erő, kevés pályaadatnál a csapat összesített teljesítménye felé húzva; az idősebb meccsek súlya 70 naponként felére csökken.
+- **Szorzómozgás:** `python collect.py odds` frissíti a szorzókat és eltárolja a változásokat (`odds_history`). A listán és a meccsoldalon nyíl jelzi az elmozdulást.
+- **Ligák szerint:** az Előzmények oldalon bajnokságonként és piaconként a találati arány és a profit.

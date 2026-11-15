@@ -228,3 +228,9 @@ details.tbl table{margin-top:6px}
 
 .pbar-legend{flex-wrap:wrap}.pbar-legend .lg{white-space:nowrap}
 @media(max-width:480px){.pbar.big .pbar-legend{font-size:13px;gap:4px 10px}.pbar-legend .lg{gap:4px}}
+
+.mv{font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.mv.dn{color:#3fb950}.mv.up{color:#eda100}
+.lg-table .lg-head td{border-top:1px solid var(--line, #30363d);padding-top:10px}
+.lg-table .lg-sub td:first-child{padding-left:22px;color:var(--mut)}
+.lg-table .lg-sub.few{opacity:.55}

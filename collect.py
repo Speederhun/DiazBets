@@ -5,10 +5,12 @@ Használat:
     python collect.py settle                 # tegnapi és mai eredmények, tippek elszámolása
     python collect.py stats [db]             # szögletstatisztika letöltése a lejátszott meccsekhez (Pro)
     python collect.py backfill [napok]       # múltbeli eredmények letöltése a modellhez (alap: 45 nap)
+    python collect.py odds [YYYY-MM-DD]      # csak a szorzók frissítése (mozgáskövetés), tippek újraszámolása
 """
 import json
 import os
 import sys
+import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -112,9 +114,15 @@ def store_odds(conn, items):
                         market_name = "CORNERS"
                     else:
                         market_name = market
+                    price = float(v["odd"])
+                    old = conn.execute("SELECT price FROM odds WHERE fixture_id=? AND market=? AND selection=?",
+                                       (fid, market_name, sel)).fetchone()
+                    if old is None or abs(old["price"] - price) > 1e-9:
+                        conn.execute("INSERT INTO odds_history(fixture_id, market, selection, ts, price) VALUES (?,?,?,?,?)",
+                                     (fid, market_name, sel, time.time(), price))
                     conn.execute(
                         "INSERT OR REPLACE INTO odds(fixture_id, market, selection, price) VALUES (?,?,?,?)",
-                        (fid, market_name, sel, float(v["odd"])),
+                        (fid, market_name, sel, price),
                     )
     conn.commit()
 
@@ -300,6 +308,30 @@ def collect(day=None):
         conn.close()
 
 
+def refresh_odds(day=None):
+    """Csak a szorzókat frissíti (a mozgás követéséhez), majd újraszámolja a még le nem zárt tippeket. Sérülteket/H2H-t nem kér."""
+    init_db()
+    conn = connect()
+    day = day or today()
+    client = Client(conn)
+    try:
+        pending = conn.execute("SELECT COUNT(*) FROM fixtures WHERE day=? AND status='NS'", (day,)).fetchone()[0]
+        if not pending:
+            log(f"{day}: nincs kezdés előtti meccs, nincs mit frissíteni")
+            return
+        items = fetch_paged(client, "odds", date=day, bookmaker=BOOKMAKER)
+        store_odds(conn, items)
+        changed = conn.execute("SELECT COUNT(*) FROM odds_history WHERE ts > ?", (time.time() - 300,)).fetchone()[0]
+        log(f"  szorzó frissítve {len(items)} meccshez, {changed} változás")
+    except BudgetExceeded:
+        log("Elfogyott a napi kéréskeret.")
+    except ApiError as e:
+        log(f"API hiba: {e}")
+    finally:
+        generate_tips(conn, day)
+        conn.close()
+
+
 def backfill(days=45):
     """Múltbeli eredmények letöltése (napi 1 kérés), ebből épül a csapatok formája és a modell."""
     init_db()
@@ -336,8 +368,39 @@ def load_odds(conn, fixture_id):
     return {(r["market"], r["selection"]): r["price"] for r in rows}
 
 
+def rest_days(conn, team_id, kickoff):
+    """Hány napja játszott utoljára a csapat (a figyelt ligákban lejátszott meccsei alapján); None, ha nincs adat."""
+    row = conn.execute(
+        """SELECT MAX(kickoff) AS k FROM fixtures WHERE status IN ('FT','AET','PEN')
+           AND (home_id = ? OR away_id = ?) AND kickoff < ?""", (team_id, team_id, kickoff)).fetchone()
+    if not row or not row["k"]:
+        return None
+    try:
+        a = datetime.fromisoformat(row["k"])
+        b = datetime.fromisoformat(kickoff)
+        return max(0, (b - a).days)
+    except ValueError:
+        return None
+
+
+def missing_counts(conn, fixture_id):
+    out = {}
+    for r in conn.execute("SELECT team_id, COUNT(*) AS n FROM injuries WHERE fixture_id=? GROUP BY team_id", (fixture_id,)):
+        out[r["team_id"]] = r["n"]
+    return out
+
+
+def load_calibration(conn):
+    rows = conn.execute(
+        """SELECT market, COALESCE(raw_prob, prob) AS p, CASE result WHEN 'win' THEN 1 ELSE 0 END AS y
+           FROM tips WHERE result IN ('win','loss') ORDER BY fixture_id DESC LIMIT 3000""").fetchall()
+    return model.fit_calibration((r["market"], r["p"], r["y"]) for r in rows)
+
+
 def generate_tips(conn, day):
     teams, avg_h, avg_a = model.load_results_table(conn, day)
+    cal = load_calibration(conn) if os.environ.get("DIAZBETS_CALIBRATE", "1") != "0" else {}
+    adjust = os.environ.get("DIAZBETS_ADJUST", "1") != "0"
     corner_rows = conn.execute(
         """SELECT f.home_id, f.away_id, sh.corners AS hc, sa.corners AS ac
            FROM fixtures f
@@ -350,8 +413,18 @@ def generate_tips(conn, day):
     for f in conn.execute("SELECT * FROM fixtures WHERE day = ? AND status = 'NS'", (day,)).fetchall():
         odds = load_odds(conn, f["id"])
         xg = None
+        extra = []
         if avg_h and model.enough_data(teams, f["home_id"], f["away_id"]):
-            xg = model.expected_goals(teams, avg_h, avg_a, f["home_id"], f["away_id"])
+            adj = None
+            if adjust:
+                rh, ra = rest_days(conn, f["home_id"], f["kickoff"]), rest_days(conn, f["away_id"], f["kickoff"])
+                mc = missing_counts(conn, f["id"])
+                adj = {"rest_h": rh, "rest_a": ra, "inj_h": mc.get(f["home_id"], 0), "inj_a": mc.get(f["away_id"], 0)}
+                if (rh is not None and rh <= 3) or (ra is not None and ra <= 3):
+                    extra.append(f"Pihenőnapok: {f['home']} {rh if rh is not None else '?'}, {f['away']} {ra if ra is not None else '?'}.")
+                if adj["inj_h"] > 1 or adj["inj_a"] > 1:
+                    extra.append(f"Hiányzók: {f['home']} {adj['inj_h']}, {f['away']} {adj['inj_a']}.")
+            xg = model.expected_goals(teams, avg_h, avg_a, f["home_id"], f["away_id"], adj)
         if xg:
             w = model.adaptive_weight(weight, model.min_games(teams, f["home_id"], f["away_id"]))
             probs = model.blend(model.probabilities(*xg), odds, w)
@@ -376,17 +449,25 @@ def generate_tips(conn, day):
                 tip["note"] += f" Piaci súly: {wc:.0%}."
             new_tips.append(tip)
         for t in new_tips:
+            raw = t["prob"]
+            cp = model.apply_calibration(cal, t["market"], raw)
+            if abs(cp - raw) >= 0.005:
+                t["prob"] = cp
+                t["value"] = (cp * t["odds"] - 1) if t["odds"] else None
+                t["note"] += f" Kalibrálva a korábbi tippek alapján: {raw:.0%} → {cp:.0%}."
+            if extra and t["market"] != "CORNERS":
+                t["note"] += " " + " ".join(extra)
             conn.execute(
-                """INSERT INTO tips(fixture_id, market, pick, prob, odds, value, note)
-                   VALUES (?,?,?,?,?,?,?)
+                """INSERT INTO tips(fixture_id, market, pick, prob, odds, value, note, raw_prob)
+                   VALUES (?,?,?,?,?,?,?,?)
                    ON CONFLICT(fixture_id, market) DO UPDATE SET pick=excluded.pick, prob=excluded.prob,
-                       odds=excluded.odds, value=excluded.value, note=excluded.note
+                       odds=excluded.odds, value=excluded.value, note=excluded.note, raw_prob=excluded.raw_prob
                    WHERE tips.result IS NULL""",
-                (f["id"], t["market"], t["pick"], t["prob"], t["odds"], t["value"], t["note"]),
+                (f["id"], t["market"], t["pick"], t["prob"], t["odds"], t["value"], t["note"], raw),
             )
             count += 1
     conn.commit()
-    log(f"{count} tipp generálva ({len(teams)} csapat adata alapján)")
+    log(f"{count} tipp generálva ({len(teams)} csapat adata alapján" + (", kalibráció aktív" if cal else "") + ")")
 
 
 # ---------------------------------------------------------------- elszámolás
@@ -462,6 +543,8 @@ if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "collect":
         collect(sys.argv[2] if len(sys.argv) > 2 else None)
+    elif cmd == "odds":
+        refresh_odds(sys.argv[2] if len(sys.argv) > 2 else None)
     elif cmd == "settle":
         settle()
     elif cmd == "stats":

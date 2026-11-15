@@ -49,8 +49,8 @@ def load():
         {"date": "2025-10-12", "home": "Demo FC", "away": "Teszt Rovers", "hg": 3, "ag": 1, "league": "Premier League"},
     ]),))
     # tipp a tegnapi meccsre, hogy az előzmények is látsszanak
-    conn.execute("INSERT OR REPLACE INTO tips VALUES (9003, '1X2', 'Away', 0.55, 1.9, 0.045, 'demó', NULL)")
-    conn.execute("INSERT OR REPLACE INTO tips VALUES (9003, 'BTTS', 'Yes', 0.6, 1.8, 0.08, 'demó', NULL)")
+    conn.execute("INSERT OR REPLACE INTO tips(fixture_id, market, pick, prob, odds, value, note, result) VALUES (9003, '1X2', 'Away', 0.55, 1.9, 0.045, 'demó', NULL)")
+    conn.execute("INSERT OR REPLACE INTO tips(fixture_id, market, pick, prob, odds, value, note, result) VALUES (9003, 'BTTS', 'Yes', 0.6, 1.8, 0.08, 'demó', NULL)")
     conn.commit()
     collect.generate_tips(conn, today)
     collect.settle_local(conn)

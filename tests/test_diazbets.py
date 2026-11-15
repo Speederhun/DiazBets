@@ -328,3 +328,73 @@ def test_live_api_requires_login_and_works():
     assert c.get("/api/live").status_code == 200
     assert c.get("/api/match/9001/live").status_code == 200
     assert c.get("/api/match/1/live").status_code == 404
+
+
+# ---------------------------------------------------------------- önjavító modell, fáradtság, ligák, szorzómozgás
+
+def test_calibration_corrects_overconfidence_and_needs_data():
+    over = [("1X2", 0.65, 1)] * 30 + [("1X2", 0.65, 0)] * 30 + [("BTTS", 0.65, 1)] * 5   # 65%-ot mondott, 50%-ban jött be
+    cal = model.fit_calibration(over)
+    adj = model.apply_calibration(cal, "1X2", 0.65)
+    assert 0.5 < adj < 0.6                       # lejjebb húzza, de a shrinkage miatt nem teljesen 50%-ra
+    assert model.apply_calibration(model.fit_calibration(over[:20]), "1X2", 0.65) == 0.65  # kevés adat: nincs igazítás
+    ok = [("1X2", 0.6, 1)] * 36 + [("1X2", 0.6, 0)] * 24                                 # 60%, pontos
+    assert abs(model.apply_calibration(model.fit_calibration(ok), "1X2", 0.6) - 0.6) < 0.01
+    assert 0.02 <= model.apply_calibration(cal, "1X2", 0.99) <= 0.98
+
+
+def test_fatigue_injury_and_venue_adjustments():
+    assert model.fatigue_factor(2) < model.fatigue_factor(3) < model.fatigue_factor(4) < model.fatigue_factor(7) == 1.0
+    assert model.fatigue_factor(None) == 1.0
+    own, opp = model.injury_factors(20)
+    assert own >= 0.94 and opp <= 1.04          # plafon
+    assert model.injury_factors(0) == (1.0, 1.0)
+    rows = [{"home_id": 1, "home": "A", "away_id": 2, "away": "B", "hg": 2, "ag": 1, "day": "2026-01-01"},
+            {"home_id": 2, "home": "B", "away_id": 1, "away": "A", "hg": 0, "ag": 2, "day": "2026-01-08"},
+            {"home_id": 1, "home": "A", "away_id": 3, "away": "C", "hg": 1, "ag": 1, "day": "2026-01-15"},
+            {"home_id": 3, "home": "C", "away_id": 2, "away": "B", "hg": 1, "ag": 0, "day": "2026-01-22"}]
+    teams, ah, aa = model.team_table_from_results(rows, now_day="2026-02-01")
+    base = model.expected_goals(teams, ah, aa, 1, 2)
+    tired = model.expected_goals(teams, ah, aa, 1, 2, {"rest_h": 2, "rest_a": 7, "inj_h": 5, "inj_a": 0})
+    assert tired[0] < base[0] and tired[1] > base[1]
+    # a friss meccs többet számít: a w_ összegek kisebbek az egyszerű összegeknél
+    assert teams[1]["w_hp"] < teams[1]["hp"]
+
+
+def test_odds_history_records_only_changes():
+    from db import connect, init_db
+    init_db()
+    conn = connect()
+    conn.execute("""INSERT OR REPLACE INTO fixtures(id, day, kickoff, league_id, season, home_id, home, away_id, away, status)
+                    VALUES (6001,'2026-11-20','2026-11-20T20:00:00+01:00',39,2026,1,'A',2,'B','NS')""")
+    conn.commit()
+
+    def item(price):
+        return [{"fixture": {"id": 6001}, "bookmakers": [{"bets": [{"id": 1, "values": [{"value": "Home", "odd": str(price)}]}]}]}]
+    collect.store_odds(conn, item(2.0))
+    collect.store_odds(conn, item(2.0))   # változatlan: nem kerül be újra
+    collect.store_odds(conn, item(1.8))
+    prices = [r["price"] for r in conn.execute("SELECT price FROM odds_history WHERE fixture_id=6001 ORDER BY ts, rowid")]
+    assert prices == [2.0, 1.8]
+    from app import odds_moves
+    mv = odds_moves(conn, [6001])[6001][("1X2", "Home")]
+    assert mv["open"] == 2.0 and mv["now"] == 1.8 and mv["pct"] < -9
+    conn.close()
+
+
+def test_generate_tips_stores_raw_prob_and_pages_show_new_sections():
+    from db import connect
+    conn = connect()
+    r = conn.execute("SELECT raw_prob, prob FROM tips WHERE fixture_id IN (9001, 9002) AND raw_prob IS NOT NULL").fetchall()
+    assert len(r) >= 1
+    # ligák szerinti tábla és szorzómozgás-jelzés megjelenik
+    conn.execute("INSERT INTO odds_history(fixture_id, market, selection, ts, price) VALUES (9001,'1X2','Home',1,2.4)")
+    conn.execute("INSERT INTO odds_history(fixture_id, market, selection, ts, price) VALUES (9001,'1X2','Home',2,1.9)")
+    conn.commit()
+    conn.close()
+    from app import app
+    c = app.test_client()
+    c.post("/login", data={"username": "teszt", "password": "jelszo1234"})
+    assert "Ligák szerint" in c.get("/history").get_data(as_text=True)
+    page = c.get("/match/9001").get_data(as_text=True)
+    assert "2.40 → 1.90" in page

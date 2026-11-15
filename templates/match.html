@@ -96,10 +96,11 @@
 <div class="card pad">
   {% for market, rows in odds.items() %}
   <div style="margin-bottom:6px"><b>{{ market }}</b>:
-    {% for o in rows %}{{ o.selection }} <b>{{ '%.2f'|format(o.price) }}</b>{{ ' · ' if not loop.last }}{% endfor %}
+    {% for o in rows %}{% set mv = moves.get((market, o.selection)) %}{{ o.selection }} <b>{{ '%.2f'|format(o.price) }}</b>{% if mv %} <span class="mv {{ 'dn' if mv.pct < 0 else 'up' }}" title="Nyitó szorzó: {{ '%.2f'|format(mv.open) }}">{{ '▼' if mv.pct < 0 else '▲' }} {{ '%.2f'|format(mv.open) }} → {{ '%.2f'|format(mv.now) }} ({{ '%+.0f'|format(mv.pct) }}%)</span>{% endif %}{{ ' · ' if not loop.last }}{% endfor %}
   </div>
   {% endfor %}
 </div>
+{% if moves %}<p class="note">A nyilak a szorzó mozgását mutatják a nyitó értékhez képest. Esés (▼): a piac inkább ezt a kimenetet várja, emelkedés (▲): kevésbé. Gyakran sérülés vagy a kezdőcsapat híre áll mögötte.</p>{% endif %}
 {% else %}<p class="note">Nincs szorzó (még nem érkezett meg, vagy elfogyott a napi keret).</p>{% endif %}
 
 <h2>Egymás ellen (utolsó 5)</h2>

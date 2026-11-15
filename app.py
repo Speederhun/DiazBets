@@ -153,12 +153,40 @@ def index():
     preds = {r["fixture_id"]: r for r in conn.execute(
         "SELECT p.* FROM predictions p JOIN fixtures f ON f.id = p.fixture_id WHERE f.day = ?", (day,))}
     used = conn.execute("SELECT count FROM api_usage ORDER BY day DESC LIMIT 1").fetchone()
+    moves = odds_moves(conn, [f["id"] for f in fixtures])
     conn.close()
+    # a tippelt kimenet szorzómozgása, ha jelentős (>=4%)
+    tip_moves = {}
+    for fid, ts in tips.items():
+        for mk, t in ts.items():
+            mv = moves.get(fid, {}).get((mk, t["pick"]))
+            if mv and abs(mv["pct"]) >= 4:
+                tip_moves[(fid, mk)] = mv
     groups = {}
     for f in fixtures:
         groups.setdefault((f["league_id"], f["league_name"], f["country"]), []).append(f)
-    return render_template("index.html", day=day, groups=groups, tips=tips, odds=odds, preds=preds,
+    return render_template("index.html", day=day, groups=groups, tips=tips, odds=odds, preds=preds, tip_moves=tip_moves,
                            prev_day=_shift(day, -1), next_day=_shift(day, 1), api_used=used["count"] if used else 0, api_budget=DAILY_BUDGET)
+
+
+def odds_moves(conn, fixture_ids):
+    """{fixture_id: {(market, selection): {'open': első ár, 'now': aktuális ár}}} - csak ahol volt változás."""
+    out = {}
+    if not fixture_ids:
+        return out
+    q = ",".join("?" * len(fixture_ids))
+    rows = conn.execute(f"""SELECT fixture_id, market, selection, price FROM odds_history
+                            WHERE fixture_id IN ({q}) ORDER BY ts""", list(fixture_ids)).fetchall()
+    first, last = {}, {}
+    for r in rows:
+        k = (r["fixture_id"], r["market"], r["selection"])
+        first.setdefault(k, r["price"])
+        last[k] = r["price"]
+    for k, o in first.items():
+        n = last[k]
+        if abs(n - o) > 1e-9:
+            out.setdefault(k[0], {})[(k[1], k[2])] = {"open": o, "now": n, "pct": (n / o - 1) * 100}
+    return out
 
 
 def _shift(day, delta):
@@ -177,6 +205,7 @@ def match(fid):
     odds = {}
     for o in conn.execute("SELECT * FROM odds WHERE fixture_id = ? ORDER BY market, selection", (fid,)):
         odds.setdefault(o["market"], []).append(o)
+    moves = odds_moves(conn, [fid]).get(fid, {})
     injuries = conn.execute("SELECT * FROM injuries WHERE fixture_id = ? ORDER BY team, player", (fid,)).fetchall()
     h = conn.execute("SELECT json FROM h2h WHERE fixture_id = ?", (fid,)).fetchone()
     h2h = json.loads(h["json"]) if h else None
@@ -200,7 +229,7 @@ def match(fid):
                 else:
                     aw += 1
         h2h_summary = {"home": hw, "draw": dr, "away": aw}
-    return render_template("match.html", f=f, tips=tips, odds=odds, injuries=injuries, pred=pred, heat=heat,
+    return render_template("match.html", f=f, tips=tips, odds=odds, moves=moves, injuries=injuries, pred=pred, heat=heat,
                            h2h=h2h, h2h_summary=h2h_summary, form=form)
 
 
@@ -251,6 +280,23 @@ def history():
             if r["odds"]:
                 s["staked"] += 1
                 s["profit"] += (r["odds"] - 1) if r["result"] == "win" else -1
+    # Liga szerinti bontás: liga összesen és piaconként
+    lg = {}
+    for r in rows:
+        if r["result"] not in ("win", "loss"):
+            continue
+        name = r["league_name"] or "?"
+        for key in ((name, None), (name, r["market"])):
+            s = lg.setdefault(key, {"n": 0, "win": 0, "profit": 0.0})
+            s["n"] += 1
+            s["win"] += r["result"] == "win"
+            if r["odds"]:
+                s["profit"] += (r["odds"] - 1) if r["result"] == "win" else -1
+    leagues = []
+    for name in sorted({k[0] for k in lg}, key=lambda n: -lg[(n, None)]["n"]):
+        tot = lg[(name, None)]
+        leagues.append({"name": name, **tot, "markets": [
+            {"market": m, **lg[(name, m)]} for m in ("1X2", "BTTS", "OU2.5", "CORNERS") if (name, m) in lg]})
     # Kalibráció: a megadott esély és a tényleges találati arány összevetése sávonként
     bands = [(0.0, 0.5), (0.5, 0.55), (0.55, 0.6), (0.6, 0.65), (0.65, 0.7), (0.7, 1.01)]
     calib = []
@@ -274,7 +320,7 @@ def history():
     chart_data = {"profit": profit, "hit": hit,
                   "calib": [{"label": c["label"], "n": c["n"], "predicted": c["predicted"] * 100,
                              "actual": c["actual"] * 100} for c in calib]}
-    return render_template("history.html", rows=rows[:300], stats=stats, calib=calib, chart_data=chart_data)
+    return render_template("history.html", rows=rows[:300], stats=stats, calib=calib, chart_data=chart_data, leagues=leagues)
 
 
 if __name__ == "__main__":

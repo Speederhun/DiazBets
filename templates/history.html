@@ -17,6 +17,24 @@
 {% endfor %}
 <p class="note">* Néhány tippnél nem volt elérhető szorzó, azok a profitba nem számítanak bele.</p>
 
+<h2>Ligák szerint</h2>
+{% if leagues %}
+<div class="card"><table class="lg-table">
+  <tr><th>Bajnokság / piac</th><th class="num">Tipp</th><th class="num">Találati arány</th><th class="num">Profit</th></tr>
+  {% for l in leagues %}
+  <tr class="lg-head"><td><b>{{ l.name }}</b></td><td class="num">{{ l.n }}</td>
+    <td class="num">{{ (l.win / l.n * 100)|round|int }}%</td>
+    <td class="num {{ 'win' if l.profit > 0 else 'loss' }}">{{ '%+.1f'|format(l.profit) }}</td></tr>
+  {% for m in l.markets %}
+  <tr class="lg-sub{{ ' few' if m.n < 10 }}"><td>{{ MARKET_LABELS[m.market] }}</td><td class="num">{{ m.n }}</td>
+    <td class="num">{{ (m.win / m.n * 100)|round|int }}%</td>
+    <td class="num {{ 'win' if m.profit > 0 else 'loss' }}">{{ '%+.1f'|format(m.profit) }}</td></tr>
+  {% endfor %}
+  {% endfor %}
+</table></div>
+<p class="note">A halványabb sorok 10-nél kevesebb tippből állnak, ezekből még nem érdemes következtetni. A profit 1 egység/tippel számolva.</p>
+{% else %}<p class="note">Még nincs elszámolt tipp.</p>{% endif %}
+
 <h2>Tőkegörbe</h2>
 <div class="card pad chart-card"><div class="chart" id="chart-profit"></div></div>
 <p class="note">Minden elszámolt, szorzóval rendelkező tipp 1 egységnyi tét. A görbe az összesített nyereség vagy veszteség egységben.</p>

@@ -26,6 +26,7 @@
     <div class="meta">
       {% for m, t in ts.items() %}
       <span class="chip {{ 'value' if t.value and t.value > 0 }}" data-market="{{ m }}">{{ MARKET_LABELS[m] }}: <b>{{ t.pick|pick_hu }}</b> {{ t.prob|pct }}
+        {% set mv = tip_moves.get((f.id, m)) %}{% if mv %}<span class="mv {{ 'dn' if mv.pct < 0 else 'up' }}" title="Szorzó: nyitó {{ '%.2f'|format(mv.open) }} → most {{ '%.2f'|format(mv.now) }}">{{ '▼' if mv.pct < 0 else '▲' }} {{ '%.2f'|format(mv.now) }}</span>{% endif %}
         {% if t.result %}<span class="{{ t.result }}">· {{ RESULT_LABELS[t.result] }}</span>{% endif %}</span>
       {% endfor %}
     </div>

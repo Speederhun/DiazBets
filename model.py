@@ -44,16 +44,60 @@ def _rate(goals, games, league_avg):
     return (goals + SHRINK_GAMES * league_avg) / (games + SHRINK_GAMES) / league_avg
 
 
-def expected_goals(teams, avg_home, avg_away, home_id, away_id):
+def _venue(t, side, avg_venue, avg_mean, for_goals):
+    """Egy csapat támadó/védekező erőszorzója a hazai vagy idegenbeli meccsei alapján.
+    A kevés pályaadatot a csapat összesített (hazai+idegen) teljesítménye felé húzza, nem a liga átlaga felé."""
+    w = "w_" if "w_hp" in t else ""
+    pre, vg = ("h", "hgf" if for_goals else "hga") if side == "home" else ("a", "agf" if for_goals else "aga")
+    og = ("agf" if for_goals else "aga") if side == "home" else ("hgf" if for_goals else "hga")
+    vgames, vgoals = t[w + pre + "p"], t[w + vg]
+    ogames = t[w + ("a" if side == "home" else "h") + "p"]
+    ogoals = t[w + og]
+    tg = vgames + ogames
+    # a csapat összesített rátája a ligaátlaghoz viszonyítva (liga-szint zsugorítással)
+    overall = (vgoals + ogoals + SHRINK_GAMES * avg_mean) / (tg + SHRINK_GAMES) / avg_mean if avg_mean else 1.0
+    prior = avg_venue * overall
+    return (vgoals + SHRINK_GAMES * prior) / (vgames + SHRINK_GAMES) / avg_venue
+
+
+def fatigue_factor(rest_days):
+    """Kevés pihenőnap kicsit visszaveti a csapat támadását (kis, óvatos korrekció)."""
+    if rest_days is None:
+        return 1.0
+    if rest_days <= 2:
+        return 0.95
+    if rest_days == 3:
+        return 0.975
+    if rest_days == 4:
+        return 0.99
+    return 1.0
+
+
+def injury_factors(n_missing):
+    """(saját támadás szorzó, ellenfél támadás szorzó) a hiányzók száma alapján; alacsony plafonnal."""
+    n = max(0, n_missing or 0)
+    own = 1 - min(0.06, 0.01 * max(0, n - 1))
+    opp = 1 + min(0.04, 0.007 * max(0, n - 1))
+    return own, opp
+
+
+def expected_goals(teams, avg_home, avg_away, home_id, away_id, adj=None):
+    """adj (nem kötelező): {rest_h, rest_a, inj_h, inj_a} pihenőnapok és hiányzók száma."""
     h, a = teams.get(home_id), teams.get(away_id)
     if not h or not a or not avg_home or not avg_away:
         return None
-    att_h = _rate(h["hgf"], h["hp"], avg_home)
-    def_h = _rate(h["hga"], h["hp"], avg_away)
-    att_a = _rate(a["agf"], a["ap"], avg_away)
-    def_a = _rate(a["aga"], a["ap"], avg_home)
+    mean = (avg_home + avg_away) / 2
+    att_h = _venue(h, "home", avg_home, mean, True)
+    def_h = _venue(h, "home", avg_away, mean, False)
+    att_a = _venue(a, "away", avg_away, mean, True)
+    def_a = _venue(a, "away", avg_home, mean, False)
     lam_h = avg_home * att_h * def_a
     lam_a = avg_away * att_a * def_h
+    if adj:
+        own_h, opp_h = injury_factors(adj.get("inj_h"))
+        own_a, opp_a = injury_factors(adj.get("inj_a"))
+        lam_h *= fatigue_factor(adj.get("rest_h")) * own_h * opp_a
+        lam_a *= fatigue_factor(adj.get("rest_a")) * own_a * opp_h
     return lam_h, lam_a
 
 
@@ -131,21 +175,41 @@ def tips_from_odds(odds):
 MIN_GAMES = 3  # csapatonként ennyi lejátszott meccs kell a saját becsléshez
 
 
-def team_table_from_results(rows):
-    """rows: lejátszott meccsek időrendben (home_id, home, away_id, away, hg, ag).
-    Ugyanazt a szerkezetet adja, mint a team_table, de a saját eredményadatbázisból."""
+HALF_LIFE_DAYS = 70  # ennyi nap után számít a meccs fele annyit: a friss forma többet nyom
+
+
+def _decay(day, now_day, half_life=HALF_LIFE_DAYS):
+    if not day or not now_day:
+        return 1.0
+    from datetime import datetime
+    try:
+        age = (datetime.strptime(now_day, "%Y-%m-%d") - datetime.strptime(day, "%Y-%m-%d")).days
+    except ValueError:
+        return 1.0
+    return 0.5 ** (max(age, 0) / half_life)
+
+
+def team_table_from_results(rows, now_day=None):
+    """rows: lejátszott meccsek időrendben (home_id, home, away_id, away, hg, ag[, day]).
+    Ugyanazt a szerkezetet adja, mint a team_table, de a saját eredményadatbázisból.
+    Ha now_day adott, a w_* mezők az idővel fakuló (friss meccset többre értékelő) összegek."""
     teams = {}
     tot_h = tot_a = n = 0
 
     def t(tid, name):
         return teams.setdefault(tid, {"name": name, "form": "", "rank": None, "points": None,
-                                      "hp": 0, "hgf": 0, "hga": 0, "ap": 0, "agf": 0, "aga": 0})
+                                      "hp": 0, "hgf": 0, "hga": 0, "ap": 0, "agf": 0, "aga": 0,
+                                      "w_hp": 0.0, "w_hgf": 0.0, "w_hga": 0.0,
+                                      "w_ap": 0.0, "w_agf": 0.0, "w_aga": 0.0})
 
     for r in rows:
         h, a = t(r["home_id"], r["home"]), t(r["away_id"], r["away"])
         hg, ag = r["hg"], r["ag"]
+        w = _decay(r["day"] if "day" in r.keys() else None, now_day)
         h["hp"] += 1; h["hgf"] += hg; h["hga"] += ag
         a["ap"] += 1; a["agf"] += ag; a["aga"] += hg
+        h["w_hp"] += w; h["w_hgf"] += w * hg; h["w_hga"] += w * ag
+        a["w_ap"] += w; a["w_agf"] += w * ag; a["w_aga"] += w * hg
         h["form"] = (h["form"] + ("W" if hg > ag else "D" if hg == ag else "L"))[-5:]
         a["form"] = (a["form"] + ("W" if ag > hg else "D" if hg == ag else "L"))[-5:]
         tot_h += hg
@@ -160,10 +224,10 @@ def load_results_table(conn, upto_day, days=150):
     from datetime import datetime, timedelta
     cutoff = (datetime.strptime(upto_day, "%Y-%m-%d") - timedelta(days=days)).strftime("%Y-%m-%d")
     rows = conn.execute(
-        """SELECT home_id, home, away_id, away, home_goals AS hg, away_goals AS ag
+        """SELECT home_id, home, away_id, away, home_goals AS hg, away_goals AS ag, day
            FROM fixtures WHERE status = 'FT' AND home_goals IS NOT NULL AND away_goals IS NOT NULL
              AND day >= ? AND day <= ? ORDER BY kickoff""", (cutoff, upto_day)).fetchall()
-    return team_table_from_results(rows)
+    return team_table_from_results(rows, now_day=upto_day)
 
 
 def enough_data(teams, home_id, away_id):
@@ -340,3 +404,60 @@ def live_1x2(lam_h, lam_a, hg, ag, elapsed):
                 away += p
     total = home + draw + away
     return {"Home": home / total, "Draw": draw / total, "Away": away / total}
+
+
+# ---------------------------------------------------------------- önjavító kalibráció
+
+CAL_BINS = (0.0, 0.45, 0.55, 0.65, 0.75, 1.01)
+CAL_SHRINK = 15       # ennyi "hibátlan" tipp húzza vissza a kevés mintás sávot az átlóra
+CAL_MIN_MARKET = 40   # piaconkénti saját görbéhez ennyi elszámolt tipp kell
+CAL_MIN_POOLED = 60   # ennyi alatt egyáltalán nincs igazítás
+
+
+def _curve(rows):
+    """rows: (esély, 1 ha nyert / 0 ha nem). Visszaad: [(átlagos esély, delta)] a sávonként, shrinkage-dzsel."""
+    pts = []
+    for lo, hi in zip(CAL_BINS, CAL_BINS[1:]):
+        b = [(p, y) for p, y in rows if lo <= p < hi]
+        if not b:
+            continue
+        n = len(b)
+        mean_p = sum(p for p, _ in b) / n
+        hits = sum(y for _, y in b)
+        adj = (hits + CAL_SHRINK * mean_p) / (n + CAL_SHRINK)
+        pts.append((mean_p, adj - mean_p))
+    return pts
+
+
+def fit_calibration(rows):
+    """rows: (market, esély, nyert 0/1) a lezárt tippekből (nyers modell-esély). Visszaad: {market: görbe, '*': közös görbe}."""
+    rows = list(rows)
+    cal = {}
+    if len(rows) < CAL_MIN_POOLED:
+        return cal
+    cal["*"] = _curve([(p, y) for _, p, y in rows])
+    by = {}
+    for m, p, y in rows:
+        by.setdefault(m, []).append((p, y))
+    for m, r in by.items():
+        if len(r) >= CAL_MIN_MARKET:
+            cal[m] = _curve(r)
+    return cal
+
+
+def apply_calibration(cal, market, p):
+    """A nyers esélyt a tanult görbe szerint igazítja (lineáris interpoláció a sávok között, a szélén állandó delta)."""
+    pts = cal.get(market) or cal.get("*")
+    if not pts:
+        return p
+    if p <= pts[0][0]:
+        d = pts[0][1]
+    elif p >= pts[-1][0]:
+        d = pts[-1][1]
+    else:
+        d = pts[-1][1]
+        for (x0, d0), (x1, d1) in zip(pts, pts[1:]):
+            if x0 <= p <= x1:
+                d = d0 + (d1 - d0) * ((p - x0) / (x1 - x0) if x1 > x0 else 0)
+                break
+    return min(0.98, max(0.02, p + d))

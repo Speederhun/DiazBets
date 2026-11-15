@@ -83,6 +83,14 @@ CREATE INDEX IF NOT EXISTS idx_snap ON live_snapshots(fixture_id, ts);
 CREATE TABLE IF NOT EXISTS fetched_days (
     day TEXT PRIMARY KEY
 );
+CREATE TABLE IF NOT EXISTS odds_history (
+    fixture_id INTEGER NOT NULL,
+    market TEXT NOT NULL,
+    selection TEXT NOT NULL,
+    ts REAL NOT NULL,
+    price REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_odds_hist ON odds_history(fixture_id, market, selection, ts);
 CREATE TABLE IF NOT EXISTS tips (
     fixture_id INTEGER NOT NULL,
     market TEXT NOT NULL,
@@ -108,5 +116,8 @@ def connect():
 def init_db():
     conn = connect()
     conn.executescript(SCHEMA)
+    cols = [r["name"] for r in conn.execute("PRAGMA table_info(tips)")]
+    if "raw_prob" not in cols:  # a kalibráció előtti (nyers) modell-esély, ebből tanul a kalibráció
+        conn.execute("ALTER TABLE tips ADD COLUMN raw_prob REAL")
     conn.commit()
     conn.close()
