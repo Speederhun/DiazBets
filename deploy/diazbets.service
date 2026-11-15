@@ -1,0 +1,16 @@
+[Unit]
+Description=DiazBets
+After=network.target
+
+[Service]
+User=diazbets
+Group=diazbets
+WorkingDirectory=/opt/diazbets
+EnvironmentFile=/opt/diazbets/.env
+ExecStart=/opt/diazbets/.venv/bin/gunicorn --workers 2 --bind 127.0.0.1:8085 app:app
+Restart=on-failure
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

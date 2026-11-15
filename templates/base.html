@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="hu"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}DiazBets{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head><body>
+{% if session.uid %}
+<header>
+  <a class="brand" href="{{ url_for('index') }}">Diaz<span>Bets</span></a>
+  <nav>
+    <a href="{{ url_for('index') }}" class="{{ 'on' if request.endpoint in ('index','match') }}">Meccsek</a>
+    <a href="{{ url_for('history') }}" class="{{ 'on' if request.endpoint=='history' }}">Előzmények</a>
+  </nav>
+  <form method="post" action="{{ url_for('logout') }}"><button class="link">Kilépés ({{ session.name }})</button></form>
+</header>
+{% endif %}
+<main>{% block content %}{% endblock %}</main>
+</body></html>

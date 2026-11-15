@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Előzmények · DiazBets{% endblock %}
+{% block content %}
+{% for scope, label in (('all','Minden tipp'), ('value','Csak pozitív értékű tippek')) %}
+<h2>{{ label }}</h2>
+{% if stats[scope] %}
+<div class="card"><table>
+  <tr><th>Piac</th><th class="num">Tipp</th><th class="num">Talált</th><th class="num">Találati arány</th><th class="num">Profit (1 egység/tipp)</th></tr>
+  {% for m, s in stats[scope].items() %}
+  <tr><td>{{ MARKET_LABELS[m] }}</td><td class="num">{{ s.n }}</td><td class="num">{{ s.win }}</td>
+    <td class="num">{{ (s.win / s.n * 100)|round|int }}%</td>
+    <td class="num {{ 'win' if s.profit > 0 else 'loss' }}">{{ '%+.1f'|format(s.profit) }}{% if s.staked < s.n %} *{% endif %}</td></tr>
+  {% endfor %}
+</table></div>
+{% else %}<p class="note">Még nincs elszámolt tipp.</p>{% endif %}
+{% endfor %}
+<p class="note">* Néhány tippnél nem volt elérhető szorzó, azok a profitba nem számítanak bele.</p>
+
+<h2>Elszámolt tippek</h2>
+<div class="card"><table>
+  {% for r in rows %}
+  <tr><td class="note">{{ r.day }}</td>
+    <td>{{ r.home }} – {{ r.away }} <span class="note">({{ r.home_goals }}–{{ r.away_goals }})</span></td>
+    <td>{{ MARKET_LABELS[r.market] }}: <b>{{ PICK_LABELS[r.pick] }}</b></td>
+    <td class="{{ r.result }}">{{ RESULT_LABELS[r.result] }}</td></tr>
+  {% else %}<tr><td class="note">Még nincs adat.</td></tr>{% endfor %}
+</table></div>
+<div class="warn">A tippek statisztikai becslések, nem biztos nyerők. A fogadás kockázattal jár, csak annyit tegyél fel, amennyit megengedhetsz magadnak.</div>
+{% endblock %}

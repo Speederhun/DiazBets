@@ -1,0 +1,32 @@
+:root{--bg:#0f1419;--card:#1a212b;--line:#2a3441;--txt:#e6edf3;--mut:#8b98a8;--acc:#2ea043;--bad:#f85149;--warn:#d29922}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+a{color:inherit;text-decoration:none}
+header{display:flex;align-items:center;gap:16px;padding:12px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:5}
+header .brand{font-weight:800;font-size:18px}header .brand span{color:var(--acc)}
+header nav{display:flex;gap:14px;flex:1}header nav a{color:var(--mut)}header nav a.on{color:var(--txt)}
+header form{margin:0}button.link{background:none;border:0;color:var(--mut);cursor:pointer;font:inherit}
+main{max-width:860px;margin:0 auto;padding:16px}
+h2{font-size:14px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin:24px 0 8px}
+.daynav{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.daynav a{padding:6px 12px;border:1px solid var(--line);border-radius:8px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:10px;overflow:hidden}
+.card a.row{display:block;padding:12px 14px}
+.teams{display:flex;justify-content:space-between;gap:8px;font-weight:600}
+.time{color:var(--mut);font-weight:400;min-width:48px}
+.score{font-variant-numeric:tabular-nums}
+.meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chip{font-size:12px;padding:3px 8px;border-radius:999px;border:1px solid var(--line);color:var(--mut)}
+.chip b{color:var(--txt)}.chip.value{border-color:var(--acc);color:var(--acc)}
+.win{color:var(--acc)}.loss{color:var(--bad)}.void{color:var(--mut)}
+table{width:100%;border-collapse:collapse}th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line)}
+th{color:var(--mut);font-weight:500;font-size:13px}td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.note{color:var(--mut);font-size:13px}
+.warn{border:1px solid var(--warn);color:var(--warn);border-radius:10px;padding:10px 12px;font-size:13px;margin:16px 0}
+.login{max-width:340px;margin:12vh auto;padding:0 16px}
+.login input{width:100%;padding:11px;margin:6px 0 12px;background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:8px;font:inherit}
+.login button{width:100%;padding:11px;background:var(--acc);border:0;border-radius:8px;color:#fff;font-weight:700;cursor:pointer}
+.err{color:var(--bad);margin-bottom:10px}
+.pad{padding:12px 14px}
+.form span{display:inline-block;width:18px;height:18px;line-height:18px;text-align:center;border-radius:4px;font-size:11px;font-weight:700;margin-right:2px;color:#fff}
+.form .W{background:#2ea043}.form .D{background:#6e7681}.form .L{background:#f85149}

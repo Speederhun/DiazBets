@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}{{ f.home }} – {{ f.away }}{% endblock %}
+{% block content %}
+<a class="note" href="{{ url_for('index', d=f.day) }}">← vissza</a>
+<h1 style="margin:6px 0 2px">{{ f.home }} – {{ f.away }}</h1>
+<div class="note">{{ f.league_name }} · {{ f.day }} {{ f.kickoff|hhmm }}
+  {% if f.home_goals is not none %}· Végeredmény: <b>{{ f.home_goals }}–{{ f.away_goals }}</b>{% endif %}</div>
+
+<h2>Tippek</h2>
+{% if tips %}
+<div class="card"><table>
+  <tr><th>Piac</th><th>Tipp</th><th class="num">Esély</th><th class="num">Szorzó</th><th class="num">Érték</th><th></th></tr>
+  {% for t in tips %}
+  <tr>
+    <td>{{ MARKET_LABELS[t.market] }}</td><td><b>{{ PICK_LABELS[t.pick] }}</b></td>
+    <td class="num">{{ t.prob|pct }}</td>
+    <td class="num">{{ '%.2f'|format(t.odds) if t.odds else '–' }}</td>
+    <td class="num {{ 'win' if t.value and t.value > 0 }}">{{ '%+.0f%%'|format(t.value*100) if t.value is not none else '–' }}</td>
+    <td class="{{ t.result or '' }}">{{ RESULT_LABELS.get(t.result, '') }}</td>
+  </tr>
+  {% endfor %}
+</table></div>
+<p class="note">{{ tips[0].note }} Az "érték" pozitív, ha a modell esélye alapján a szorzó többet fizet a kelleténél. Szöglettippet ebben a verzióban nem számolunk.</p>
+{% else %}
+<p class="note">Ehhez a meccshez nincs tipp (nincs elég tabella-adat, például kieséses szakasz).</p>
+{% endif %}
+
+{% if form %}
+<h2>Forma</h2>
+<div class="card pad">
+  {% for tid, t in form.items() %}
+  <div>{{ t.name }} ({{ t.rank }}. hely, {{ t.points }} pont)
+    <span class="form">{% for c in t.form %}<span class="{{ c }}">{{ c }}</span>{% endfor %}</span></div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<h2>Szorzók</h2>
+{% if odds %}
+<div class="card pad">
+  {% for market, rows in odds.items() %}
+  <div style="margin-bottom:6px"><b>{{ market }}</b>:
+    {% for o in rows %}{{ o.selection }} <b>{{ '%.2f'|format(o.price) }}</b>{{ ' · ' if not loop.last }}{% endfor %}
+  </div>
+  {% endfor %}
+</div>
+{% else %}<p class="note">Nincs szorzó (még nem érkezett meg, vagy elfogyott a napi keret).</p>{% endif %}
+
+<h2>Egymás ellen (utolsó 5)</h2>
+{% if h2h %}
+  {% if h2h_summary %}<p class="note">{{ f.home }} {{ h2h_summary.home }} győzelem · döntetlen {{ h2h_summary.draw }} · {{ f.away }} {{ h2h_summary.away }} győzelem</p>{% endif %}
+  <div class="card"><table>
+    {% for m in h2h %}<tr><td class="note">{{ m.date }}</td><td>{{ m.home }} – {{ m.away }}</td><td class="num"><b>{{ m.hg }}–{{ m.ag }}</b></td></tr>{% endfor %}
+  </table></div>
+{% else %}<p class="note">Nincs adat.</p>{% endif %}
+
+<h2>Sérültek, eltiltottak</h2>
+{% if injuries %}
+<div class="card"><table>
+  {% for i in injuries %}<tr><td>{{ i.team }}</td><td>{{ i.player }}</td><td class="note">{{ i.reason or i.type }}</td></tr>{% endfor %}
+</table></div>
+{% else %}<p class="note">Nincs jelentett hiányzó (vagy az adat még nem érkezett meg).</p>{% endif %}
+{% endblock %}
