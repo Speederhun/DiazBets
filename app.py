@@ -10,6 +10,7 @@ from werkzeug.security import check_password_hash
 
 from apifootball import DAILY_BUDGET
 import live
+import model
 from db import connect, init_db
 
 TZ = ZoneInfo("Europe/Budapest")
@@ -24,11 +25,8 @@ app.config.update(
 )
 init_db()
 
-MARKET_LABELS = {"1X2": "Győztes", "BTTS": "Mindkét csapat szerez gólt", "OU2.5": "Gólok (2.5)", "CORNERS": "Szögletek"}
-PICK_LABELS = {
-    "Home": "Hazai", "Draw": "Döntetlen", "Away": "Vendég",
-    "Yes": "Igen", "No": "Nem", "Over 2.5": "Felett", "Under 2.5": "Alatt",
-}
+MARKET_LABELS = live.MARKET_HU
+PICK_LABELS = live.PICK_HU
 RESULT_LABELS = {"win": "Nyert", "loss": "Vesztett", "void": "Érvénytelen"}
 
 
@@ -51,10 +49,7 @@ def hhmm(iso):
 
 @app.template_filter("pick_hu")
 def pick_hu(pick):
-    if pick in PICK_LABELS:
-        return PICK_LABELS[pick]
-    side, _, line = pick.partition(" ")
-    return f"{ {'Over': 'Felett', 'Under': 'Alatt'}.get(side, side) } {line}".strip()
+    return live.pick_hu(pick)
 
 
 @app.template_filter("pct")
@@ -74,6 +69,42 @@ def security_headers(resp):
     resp.headers["Referrer-Policy"] = "same-origin"
     resp.headers["Cache-Control"] = "no-store"
     return resp
+
+
+HEAT_STOPS = ["#0d366b", "#184f95", "#256abf", "#3987e5", "#6da7ec", "#9ec5f4"]  # egyszínű (kék) szekvenciális skála
+
+
+def _hex_rgb(h):
+    return tuple(int(h[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def heat_color(t):
+    """t: 0..1 -> (háttér, szövegszín). Világos cellán sötét, sötét cellán világos szöveg."""
+    t = max(0.0, min(1.0, t))
+    pos = t * (len(HEAT_STOPS) - 1)
+    lo = int(pos)
+    hi = min(lo + 1, len(HEAT_STOPS) - 1)
+    f = pos - lo
+    c1, c2 = _hex_rgb(HEAT_STOPS[lo]), _hex_rgb(HEAT_STOPS[hi])
+    rgb = tuple(round(c1[k] + (c2[k] - c1[k]) * f) for k in range(3))
+    return "#%02x%02x%02x" % rgb, ("#0b0b0b" if t >= 0.72 else "#ffffff")
+
+
+def build_heatmap(lam_h, lam_a, n=6):
+    mat = model.score_matrix(lam_h, lam_a, n)
+    pmax = max(max(r) for r in mat)
+    top = model.top_scores(mat, 3)
+    top_cells = {(c["h"], c["a"]) for c in top[:1]}
+    rows = []
+    for i in range(n):
+        row = []
+        for j in range(n):
+            bg, fg = heat_color(mat[i][j] / pmax)
+            p = mat[i][j]
+            row.append({"h": i, "a": j, "p": p, "txt": "<1" if p < 0.005 else f"{p * 100:.0f}",
+                        "bg": bg, "fg": fg, "top": (i, j) in top_cells})
+        rows.append(row)
+    return {"rows": rows, "top": top, "coverage": sum(sum(r) for r in mat)}
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -119,12 +150,14 @@ def index():
     for o in conn.execute("""SELECT o.* FROM odds o JOIN fixtures f ON f.id = o.fixture_id
                              WHERE f.day = ? AND o.market = '1X2'""", (day,)):
         odds.setdefault(o["fixture_id"], {})[o["selection"]] = o["price"]
+    preds = {r["fixture_id"]: r for r in conn.execute(
+        "SELECT p.* FROM predictions p JOIN fixtures f ON f.id = p.fixture_id WHERE f.day = ?", (day,))}
     used = conn.execute("SELECT count FROM api_usage ORDER BY day DESC LIMIT 1").fetchone()
     conn.close()
     groups = {}
     for f in fixtures:
         groups.setdefault((f["league_id"], f["league_name"], f["country"]), []).append(f)
-    return render_template("index.html", day=day, groups=groups, tips=tips, odds=odds,
+    return render_template("index.html", day=day, groups=groups, tips=tips, odds=odds, preds=preds,
                            prev_day=_shift(day, -1), next_day=_shift(day, 1), api_used=used["count"] if used else 0, api_budget=DAILY_BUDGET)
 
 
@@ -147,7 +180,8 @@ def match(fid):
     injuries = conn.execute("SELECT * FROM injuries WHERE fixture_id = ? ORDER BY team, player", (fid,)).fetchall()
     h = conn.execute("SELECT json FROM h2h WHERE fixture_id = ?", (fid,)).fetchone()
     h2h = json.loads(h["json"]) if h else None
-    import model
+    pred = conn.execute("SELECT * FROM predictions WHERE fixture_id = ?", (fid,)).fetchone()
+    heat = build_heatmap(pred["lam_h"], pred["lam_a"]) if pred and pred["lam_h"] is not None else None
     teams, _, _ = model.load_results_table(conn, f["day"])
     form = {tid: teams[tid] for tid in (f["home_id"], f["away_id"]) if tid in teams}
     conn.close()
@@ -166,7 +200,7 @@ def match(fid):
                 else:
                     aw += 1
         h2h_summary = {"home": hw, "draw": dr, "away": aw}
-    return render_template("match.html", f=f, tips=tips, odds=odds, injuries=injuries,
+    return render_template("match.html", f=f, tips=tips, odds=odds, injuries=injuries, pred=pred, heat=heat,
                            h2h=h2h, h2h_summary=h2h_summary, form=form)
 
 
@@ -200,7 +234,7 @@ def history():
     rows = conn.execute(
         """SELECT t.*, f.home, f.away, f.day, f.home_goals, f.away_goals, f.league_name
            FROM tips t JOIN fixtures f ON f.id = t.fixture_id
-           WHERE t.result IS NOT NULL ORDER BY f.day DESC, f.kickoff DESC LIMIT 300""").fetchall()
+           WHERE t.result IS NOT NULL ORDER BY f.day DESC, f.kickoff DESC LIMIT 5000""").fetchall()
     conn.close()
     stats = {}
     for scope in ("all", "value"):
@@ -226,7 +260,21 @@ def history():
             calib.append({"label": f"{int(lo*100)}–{min(int(hi*100), 100)}%", "n": len(sel),
                           "predicted": sum(r["prob"] for r in sel) / len(sel),
                           "actual": sum(r["result"] == "win" for r in sel) / len(sel)})
-    return render_template("history.html", rows=rows, stats=stats, calib=calib)
+    # Diagramok: időrendben (a lekérdezés újabbtól régebbi felé rendez)
+    chrono = [r for r in reversed(rows) if r["result"] in ("win", "loss")]
+    profit, hit, wins, pexp, cum = [], [], 0, 0.0, 0.0
+    for i, r in enumerate(chrono, 1):
+        title = f'{r["day"]} · {r["home"]} – {r["away"]} ({MARKET_LABELS.get(r["market"], r["market"])}: {live.pick_hu(r["pick"])})'
+        wins += r["result"] == "win"
+        pexp += r["prob"]
+        hit.append({"x": i, "label": title, "actual": wins / i * 100, "expected": pexp / i * 100})
+        if r["odds"]:
+            cum += (r["odds"] - 1) if r["result"] == "win" else -1
+            profit.append({"x": len(profit) + 1, "label": title, "y": round(cum, 2)})
+    chart_data = {"profit": profit, "hit": hit,
+                  "calib": [{"label": c["label"], "n": c["n"], "predicted": c["predicted"] * 100,
+                             "actual": c["actual"] * 100} for c in calib]}
+    return render_template("history.html", rows=rows[:300], stats=stats, calib=calib, chart_data=chart_data)
 
 
 if __name__ == "__main__":

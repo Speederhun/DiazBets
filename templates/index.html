@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import pbar %}
 {% block page %}index{% endblock %}
 {% block content %}
 <div class="daynav">
@@ -16,6 +17,8 @@
       <div class="mscore" data-score>{% if f.home_goals is not none and f.status not in ('NS','TBD') %}{{ f.home_goals }} : {{ f.away_goals }}{% else %}–{% endif %}</div>
       <div class="mteam away">{% if f.away_logo %}<img class="logo" src="{{ f.away_logo }}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">{% endif %}<span>{{ f.away }}</span></div>
     </div>
+    {% set pr = preds.get(f.id) %}
+    {% if pr %}<div class="pbar-wrap" data-pred="1">{{ pbar(pr, 'compact') }}</div>{% endif %}
     {% set o = odds.get(f.id) %}
     {% if o %}<div class="note odds-line">Szorzó: 1 <b>{{ o.get('Home','–') }}</b> · X <b>{{ o.get('Draw','–') }}</b> · 2 <b>{{ o.get('Away','–') }}</b></div>{% endif %}
     {% set ts = tips.get(f.id) %}

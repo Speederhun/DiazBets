@@ -304,3 +304,39 @@ def min_games(teams, home_id, away_id):
         t = teams.get(tid)
         return (t["hp"] + t["ap"]) if t else 0
     return min(g(home_id), g(away_id))
+
+
+# ---------------------------------------------------------------- hőtérkép, élő esély
+
+def score_matrix(lam_h, lam_a, n=6):
+    """n x n mátrix: [hazai gólok][vendég gólok] = valószínűség."""
+    ph = [_pois(i, lam_h) for i in range(n)]
+    pa = [_pois(j, lam_a) for j in range(n)]
+    return [[ph[i] * pa[j] for j in range(n)] for i in range(n)]
+
+
+def top_scores(matrix, k=3):
+    cells = [(matrix[i][j], i, j) for i in range(len(matrix)) for j in range(len(matrix[0]))]
+    cells.sort(reverse=True)
+    return [{"h": i, "a": j, "p": p} for p, i, j in cells[:k]]
+
+
+def live_1x2(lam_h, lam_a, hg, ag, elapsed):
+    """1X2 esély az aktuális állás és a hátralévő idő alapján (a várható gólok az idővel arányosan fogynak)."""
+    left = max(0.0, 90 - min(max(elapsed or 0, 0), 90)) / 90
+    lh, la = lam_h * left, lam_a * left
+    home = draw = away = 0.0
+    for i in range(MAX_GOALS + 1):
+        pi = _pois(i, lh) if lh > 0 else (1.0 if i == 0 else 0.0)
+        for j in range(MAX_GOALS + 1):
+            pj = _pois(j, la) if la > 0 else (1.0 if j == 0 else 0.0)
+            p = pi * pj
+            d = (hg - ag) + (i - j)
+            if d > 0:
+                home += p
+            elif d == 0:
+                draw += p
+            else:
+                away += p
+    total = home + draw + away
+    return {"Home": home / total, "Draw": draw / total, "Away": away / total}

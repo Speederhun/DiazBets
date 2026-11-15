@@ -1,0 +1,12 @@
+{# Esélysáv: hazai / döntetlen / vendég. A szegmensek közt 2 px rés, a számok a sáv alatt (nem a szegmensben), így semmi sem vágódik le. #}
+{% macro pbar(p, size='') %}
+{% set h = p.p_home * 100 %}{% set d = p.p_draw * 100 %}{% set a = p.p_away * 100 %}
+<div class="pbar {{ size }}" role="img" aria-label="Esély: hazai {{ h|round|int }}%, döntetlen {{ d|round|int }}%, vendég {{ a|round|int }}%">
+  <div class="pbar-track"><i class="ph" style="width:{{ '%.1f'|format(h) }}%"></i><i class="pd" style="width:{{ '%.1f'|format(d) }}%"></i><i class="pa" style="width:{{ '%.1f'|format(a) }}%"></i></div>
+  <div class="pbar-legend">
+    <span class="lg h"><i class="sw"></i><b>{{ h|round|int }}%</b><em>Hazai</em></span>
+    <span class="lg d"><i class="sw"></i><b>{{ d|round|int }}%</b><em>Döntetlen</em></span>
+    <span class="lg a"><i class="sw"></i><b>{{ a|round|int }}%</b><em>Vendég</em></span>
+  </div>
+</div>
+{% endmacro %}

@@ -1,4 +1,4 @@
-:root{--bg:#0f1419;--card:#1a212b;--line:#2a3441;--txt:#e6edf3;--mut:#8b98a8;--acc:#2ea043;--bad:#f85149;--warn:#d29922}
+:root{--home:#3987e5;--away:#d95926;--draw:#6e7681;--surface:#1a212b;--bg:#0f1419;--card:#1a212b;--line:#2a3441;--txt:#e6edf3;--mut:#8b98a8;--acc:#2ea043;--bad:#f85149;--warn:#d29922}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
 a{color:inherit;text-decoration:none}
@@ -104,8 +104,8 @@ th{color:var(--mut);font-weight:500;font-size:13px}td.num,th.num{text-align:righ
 .st-bars>div{height:6px;background:#ffffff10;border-radius:6px;overflow:hidden;display:flex}
 .st-bars .h{justify-content:flex-end}
 .st-bars i{display:block;height:100%;border-radius:6px;transition:width .8s ease}
-.st-bars .h i{background:linear-gradient(270deg,#2ea043,#56d364)}
-.st-bars .a i{background:linear-gradient(90deg,#388bfd,#79c0ff)}
+.st-bars .h i{background:var(--home)}
+.st-bars .a i{background:var(--away)}
 
 @media (max-width:520px){
   .mrow{gap:6px}
@@ -122,3 +122,109 @@ header form button{white-space:nowrap}
 
 .sb-score span:empty{display:none}
 .sb-center{display:flex;flex-direction:column;align-items:center}
+
+
+/* ---------- esélysáv ---------- */
+.pbar-wrap{margin-top:10px}
+.pbar-track{display:flex;gap:2px;height:8px}
+.pbar-track i{display:block;height:100%;transition:width .9s ease}
+.pbar-track .ph{background:var(--home);border-radius:4px 0 0 4px}
+.pbar-track .pd{background:var(--draw)}
+.pbar-track .pa{background:var(--away);border-radius:0 4px 4px 0}
+.pbar-legend{display:flex;justify-content:space-between;gap:8px;margin-top:6px;font-size:13px;color:var(--mut)}
+.pbar-legend .lg{display:inline-flex;align-items:center;gap:6px}
+.pbar-legend .lg.a{flex-direction:row-reverse}
+.pbar-legend b{color:var(--txt);font-variant-numeric:tabular-nums}
+.pbar-legend em{font-style:normal}
+.sw{width:9px;height:9px;border-radius:50%;display:inline-block}
+.lg.h .sw{background:var(--home)}.lg.d .sw{background:var(--draw)}.lg.a .sw{background:var(--away)}
+.pbar.big .pbar-track{height:14px}
+.pbar.big .pbar-track .ph{border-radius:7px 0 0 7px}.pbar.big .pbar-track .pa{border-radius:0 7px 7px 0}
+.pbar.big .pbar-legend{font-size:15px;margin-top:10px}
+.pbar.compact .pbar-legend{justify-content:space-between;font-size:12px;margin-top:5px}
+.pbar.compact .pbar-legend em{display:none}
+.pbar.compact .pbar-legend .lg.d{justify-content:center}
+.live-tag{margin-left:8px;color:#ff7b72;font-size:11px;letter-spacing:.04em;text-transform:none;font-weight:700}
+.live-tag[hidden]{display:none}
+
+/* ---------- hőtérkép ---------- */
+.heat-top{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+.heat-scroll{overflow-x:auto}
+.heat{border-collapse:separate;border-spacing:2px;width:100%;max-width:560px;margin:0 auto;table-layout:fixed}
+.heat th{font-weight:600;font-size:12px;color:var(--mut);padding:4px;text-align:center;border:0}
+.heat th.corner{font-size:10px;font-weight:500;text-align:left;width:92px;white-space:nowrap}
+.heat td{border:0;border-radius:6px;text-align:center;padding:0;height:40px;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;transition:opacity .5s,box-shadow .3s}
+.heat td.top{box-shadow:0 0 0 2px #fff inset}
+.heat td.cur{box-shadow:0 0 0 3px #f85149 inset;animation:pulse2 1.6s infinite}
+.heat td.dead{opacity:.18}
+@keyframes pulse2{0%,100%{filter:brightness(1)}50%{filter:brightness(1.25)}}
+
+/* ---------- pálya ---------- */
+.pitch-card{padding:10px}
+.pitch-head{display:flex;justify-content:space-between;gap:10px;font-weight:700;margin-bottom:8px;font-size:14px;flex-wrap:wrap}
+.pitch-head span{display:inline-flex;align-items:center;gap:7px}
+.pitch-head .formation{color:var(--mut);font-weight:500}
+.pitch-svg{width:100%;height:auto;display:block;border-radius:12px;background:#14301f}
+.pitch-svg .ln{fill:none;stroke:#ffffff45;stroke-width:.28}
+.pitch-svg .stripe{fill:#ffffff08}
+.pitch-svg .pl circle.dot{stroke:#14301f;stroke-width:.5}
+.pitch-svg .pl.home circle.dot{fill:var(--home)}
+.pitch-svg .pl.away circle.dot{fill:var(--away)}
+.pitch-svg .pl text.num{fill:#fff;font-size:2.4px;font-weight:700;text-anchor:middle;dominant-baseline:central}
+.pitch-svg .pl text.nm{fill:#e6edf3;font-size:1.9px;text-anchor:middle;paint-order:stroke;stroke:#14301f;stroke-width:.5px}
+.pitch-svg .pl.off{opacity:.55}
+.pitch-svg .mk{font-size:2.3px;text-anchor:middle;dominant-baseline:central}
+.bench{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px;font-size:13px}
+.bench h4{margin:0 0 6px;font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+.bench div.p{padding:3px 0;border-bottom:1px solid #ffffff0d}
+.bench .n{display:inline-block;min-width:22px;color:var(--mut);font-variant-numeric:tabular-nums}
+.bench .in{color:var(--txt);font-weight:600}
+.bench .in::after{content:" ↑";color:#56d364}
+
+/* ---------- diagramok (nyomás, előzmények) ---------- */
+.chart{position:relative;width:100%}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.chart .grid{stroke:#ffffff12;stroke-width:1;shape-rendering:crispEdges}
+.chart .axis-t{fill:var(--mut);font-size:11px}
+.chart .zero{stroke:#ffffff30;stroke-width:1;shape-rendering:crispEdges}
+.chart .ln{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.chart .cross{stroke:#ffffff40;stroke-width:1}
+.chart .tip{position:absolute;pointer-events:none;background:#0b0f14;border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:12px;line-height:1.5;white-space:nowrap;z-index:6;box-shadow:0 8px 24px #0009;transform:translate(-50%,-110%)}
+.chart .tip b{font-variant-numeric:tabular-nums}
+.chart-legend{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:8px;font-size:13px;color:var(--mut)}
+.chart-legend span{display:inline-flex;align-items:center;gap:6px}
+.chart-legend i{display:inline-block;width:14px;height:3px;border-radius:2px}
+.chart-empty{color:var(--mut);font-size:13px;padding:14px 4px}
+details.tbl{margin-top:8px;font-size:13px;color:var(--mut)}
+details.tbl summary{cursor:pointer}
+details.tbl table{margin-top:6px}
+
+/* ---------- harang, felirat, toast, konfetti ---------- */
+.bell{font-size:17px;line-height:1;padding:4px 6px}
+.bell.on{filter:none}
+#toasts{position:fixed;left:0;right:0;top:0;z-index:50;display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px;pointer-events:none}
+.goal-banner{pointer-events:auto;cursor:pointer;width:min(560px,100%);text-align:center;padding:16px 18px 14px;border-radius:18px;
+  background:linear-gradient(135deg,#1f7a3a,#2ea043 55%,#56d364);color:#fff;box-shadow:0 18px 50px -12px #2ea043cc;animation:bannerin .5s cubic-bezier(.2,1.4,.4,1)}
+.goal-banner .big{font-size:42px;font-weight:900;letter-spacing:.06em;line-height:1.05;text-shadow:0 2px 12px #0006;animation:goalpulse .9s ease-in-out 3}
+.goal-banner .sub{margin-top:6px;font-size:17px;font-weight:700}
+.goal-banner .min{opacity:.85;font-weight:500}
+@keyframes bannerin{from{transform:translateY(-120%) scale(.9);opacity:0}to{transform:none;opacity:1}}
+@keyframes goalpulse{0%,100%{transform:scale(1)}50%{transform:scale(1.1)}}
+.goal-banner.out{animation:bannerout .35s ease-in forwards}
+@keyframes bannerout{to{transform:translateY(-120%);opacity:0}}
+.toast{pointer-events:auto;background:#0b0f14;border:1px solid var(--acc);color:var(--txt);border-radius:12px;padding:10px 16px;font-weight:600;box-shadow:0 10px 30px #000a;animation:bannerin .4s ease-out}
+.toast.out{animation:bannerout .3s ease-in forwards}
+#confetti{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:60}
+@media (prefers-reduced-motion:reduce){
+  .goal-banner,.goal-banner .big,.toast,.heat td.cur,.live-dot{animation:none}
+  .pbar-track i,#sb-bar,.st-bars i{transition:none}
+}
+@media (max-width:520px){
+  .goal-banner .big{font-size:34px}
+  .bench{grid-template-columns:1fr}
+  .heat td{height:34px;font-size:12px}
+  .heat th.corner{width:64px;font-size:9px}
+}
+
+.pbar-legend{flex-wrap:wrap}.pbar-legend .lg{white-space:nowrap}
+@media(max-width:480px){.pbar.big .pbar-legend{font-size:13px;gap:4px 10px}.pbar-legend .lg{gap:4px}}

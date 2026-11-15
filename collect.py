@@ -356,12 +356,18 @@ def generate_tips(conn, day):
             w = model.adaptive_weight(weight, model.min_games(teams, f["home_id"], f["away_id"]))
             probs = model.blend(model.probabilities(*xg), odds, w)
             new_tips = model.build_tips(probs, odds, *xg)
+            conn.execute("INSERT OR REPLACE INTO predictions(fixture_id, p_home, p_draw, p_away, lam_h, lam_a) VALUES (?,?,?,?,?,?)",
+                         (f["id"], probs["Home"], probs["Draw"], probs["Away"], xg[0], xg[1]))
             if w and model.market_probs(odds):
                 for t in new_tips:
                     t["note"] += f" A tipp a saját modell és a szorzók átlaga (piac súlya {w:.0%}, kevés meccsnél nagyobb)."
         else:
             # Kevés saját adat: szorzó alapú tartalék tipp (ha van szorzó)
             new_tips = model.tips_from_odds(odds)
+            mk = model.market_probs(odds)
+            if all(k in mk for k in ("Home", "Draw", "Away")):
+                conn.execute("INSERT OR REPLACE INTO predictions(fixture_id, p_home, p_draw, p_away, lam_h, lam_a) VALUES (?,?,?,?,NULL,NULL)",
+                             (f["id"], mk["Home"], mk["Draw"], mk["Away"]))
         cx = model.expected_corners(c_teams, c_avg_h, c_avg_a, f["home_id"], f["away_id"]) if c_avg_h else None
         if cx:
             wc = model.adaptive_weight(weight, model.min_corner_games(c_teams, f["home_id"], f["away_id"]))

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Előzmények · DiazBets{% endblock %}
+{% block page %}history{% endblock %}
 {% block content %}
 {% for scope, label in (('all','Minden tipp'), ('value','Csak pozitív értékű tippek')) %}
 <h2>{{ label }}</h2>
@@ -16,7 +17,18 @@
 {% endfor %}
 <p class="note">* Néhány tippnél nem volt elérhető szorzó, azok a profitba nem számítanak bele.</p>
 
+<h2>Tőkegörbe</h2>
+<div class="card pad chart-card"><div class="chart" id="chart-profit"></div></div>
+<p class="note">Minden elszámolt, szorzóval rendelkező tipp 1 egységnyi tét. A görbe az összesített nyereség vagy veszteség egységben.</p>
+
+<h2>Találati arány és a várt arány</h2>
+<div class="card pad chart-card"><div class="chart" id="chart-hit"></div></div>
+<p class="note">A két vonal közelsége mutatja, hogy a modell esélyei hosszú távon igazak-e. Az elején kevés tippnél erősen ingadozik.</p>
+
 <h2>Pontosság: stimmel-e az esély?</h2>
+<div class="card pad chart-card"><div class="chart" id="chart-calib"></div></div>
+<p class="note">Minden pont egy esélysáv. Az átlón lévő pont azt jelenti, hogy a megadott esély pontosan egyezik a valósággal. Az átló alatt a modell túl magabiztos volt, felette óvatos.</p>
+<script type="application/json" id="chart-data">{{ chart_data|tojson }}</script>
 {% if calib %}
 <div class="card"><table>
   <tr><th>Megadott esély</th><th class="num">Tipp</th><th class="num">Átlagos esély</th><th class="num">Tényleges találat</th></tr>

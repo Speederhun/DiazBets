@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import pbar %}
 {% block title %}{{ f.home }} – {{ f.away }}{% endblock %}
 {% block page %}match{% endblock %}
 {% block content %}
@@ -23,11 +24,43 @@
   <div class="sb-progress" id="sb-progress" hidden><div id="sb-bar"></div></div>
 </section>
 
+{% if pred %}
+<h2>Esélyek <span class="live-tag" id="prob-live" hidden>élő állás szerint</span></h2>
+<div class="card pad" id="prob-card" data-pred="1">{{ pbar(pred, 'big') }}</div>
+{% endif %}
+
 <h2 id="h-events" hidden>Események</h2>
 <div id="events" class="timeline"></div>
 
 <h2 id="h-stats" hidden>Élő statisztika</h2>
 <div id="stats" class="statbox" hidden></div>
+
+<h2 id="h-lineups" hidden>Felállás</h2>
+<div id="lineups" hidden></div>
+
+<h2 id="h-pressure" hidden>Élő nyomás</h2>
+<div id="pressure" class="card pad" hidden></div>
+
+{% if heat %}
+<h2>Legvalószínűbb végeredmények</h2>
+<div class="card pad heat-card">
+  <div class="heat-top">
+    {% for c in heat.top %}<span class="chip{{ ' value' if loop.first }}"><b>{{ c.h }}–{{ c.a }}</b> {{ (c.p * 100)|round|int }}%</span>{% endfor %}
+    <span class="note">Várható gólok: {{ '%.2f'|format(pred.lam_h) }} – {{ '%.2f'|format(pred.lam_a) }} (saját modell)</span>
+  </div>
+  <div class="heat-scroll"><table class="heat" id="heat" aria-label="Végeredmények valószínűsége százalékban">
+    <thead><tr><th class="corner">Hazai ↓ &nbsp; Vendég →</th>{% for j in range(heat.rows|length) %}<th>{{ j }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for row in heat.rows %}
+      <tr><th>{{ loop.index0 }}</th>
+      {% for c in row %}<td class="{{ 'top' if c.top }}" data-h="{{ c.h }}" data-a="{{ c.a }}" style="background:{{ c.bg }};color:{{ c.fg }}" title="{{ c.h }}–{{ c.a }}: {{ '%.1f'|format(c.p * 100) }}%">{{ c.txt }}</td>{% endfor %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="note">A cella színe és száma a végeredmény esélye (%). A keretes a legvalószínűbb. Élő meccsnél a már lehetetlen eredmények elhalványulnak, az aktuális állás kiemelt.</p>
+</div>
+{% endif %}
 
 <h2>Tippek</h2>
 {% if tips %}

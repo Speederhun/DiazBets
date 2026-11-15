@@ -66,6 +66,20 @@ CREATE TABLE IF NOT EXISTS cache (
     ts REAL NOT NULL,
     json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS predictions (
+    fixture_id INTEGER PRIMARY KEY,
+    p_home REAL, p_draw REAL, p_away REAL,
+    lam_h REAL, lam_a REAL
+);
+CREATE TABLE IF NOT EXISTS live_snapshots (
+    fixture_id INTEGER NOT NULL,
+    ts REAL NOT NULL,
+    elapsed INTEGER,
+    hg INTEGER, ag INTEGER,
+    h_shots REAL, a_shots REAL, h_sot REAL, a_sot REAL,
+    h_corners REAL, a_corners REAL, h_xg REAL, a_xg REAL
+);
+CREATE INDEX IF NOT EXISTS idx_snap ON live_snapshots(fixture_id, ts);
 CREATE TABLE IF NOT EXISTS fetched_days (
     day TEXT PRIMARY KEY
 );
