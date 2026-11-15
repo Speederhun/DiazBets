@@ -81,3 +81,50 @@ def test_tips_from_odds_fallback():
     assert tips["1X2"]["value"] is None
     assert "OU2.5" not in tips  # nincs hozzá szorzó
     assert model.tips_from_odds({}) == []
+
+
+def test_results_table_and_fallback_threshold():
+    rows = [{"home_id": 1, "home": "A", "away_id": 2, "away": "B", "hg": 2, "ag": 0}] * 3
+    teams, ah, aa = model.team_table_from_results(rows)
+    assert teams[1]["form"] == "WWW" and teams[2]["form"] == "LLL"
+    assert ah == 2 and aa == 0
+    assert model.enough_data(teams, 1, 2)
+    assert not model.enough_data(teams, 1, 99)
+
+
+class FakeClient:
+    """Az ingyenes csomag viselkedését utánozza: dátum szerinti meccslista megy, a többi 'plan' hibát ad."""
+    def __init__(self, conn, api_key=None):
+        self.calls = []
+
+    def get(self, path, **params):
+        self.calls.append(path)
+        if path == "fixtures":
+            d = params["date"]
+            item = lambda fid, h, a, st, hg, ag: {
+                "fixture": {"id": fid, "date": f"{d}T15:00:00+01:00", "status": {"short": st}},
+                "league": {"id": 5, "name": "UEFA Nations League", "country": "World", "season": 2026},
+                "teams": {"home": {"id": h, "name": f"T{h}", "logo": None}, "away": {"id": a, "name": f"T{a}", "logo": None}},
+                "goals": {"home": hg, "away": ag}}
+            if d == collect.today():
+                return {"response": [item(777, 1, 2, "NS", None, None),
+                                     {**item(778, 3, 4, "NS", None, None), "league": {"id": 999, "name": "Ismeretlen", "country": "X", "season": 2026}}]}
+            return {"response": [item(int(d[-2:]) * 10 + 1, 1, 2, "FT", 2, 1),
+                                 item(int(d[-2:]) * 10 + 2, 2, 1, "FT", 0, 0)]}
+        raise collect.ApiError(f"{path}: {{'plan': 'Free plans do not have access to this season, try from 2022 to 2024.'}}")
+
+
+def test_collect_survives_plan_errors_and_builds_tips_from_results(monkeypatch):
+    from db import connect, init_db
+    init_db()
+    monkeypatch.setattr(collect, "Client", FakeClient)
+    collect.backfill(4)
+    conn = connect()
+    assert conn.execute("SELECT COUNT(*) FROM fixtures WHERE status='FT' AND home IN ('T1','T2')").fetchone()[0] == 8
+    conn.close()
+    collect.collect()
+    conn = connect()
+    tips = conn.execute("SELECT market FROM tips WHERE fixture_id = 777").fetchall()
+    assert len(tips) == 3  # 4 nap x 2 meccs -> mindkét csapatnak van elég saját adata
+    assert conn.execute("SELECT COUNT(*) FROM fixtures WHERE id = 778").fetchone()[0] == 0  # nem figyelt liga
+    conn.close()

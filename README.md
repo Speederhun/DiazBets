@@ -4,7 +4,7 @@ Napi focimeccs-elemző két felhasználónak: meccsek, szorzók, sérültek, egy
 (győztes, mindkét csapat szerez gólt, gólok 2.5 felett/alatt), előzmény-statisztikával.
 
 - Adatforrás: [API-Football](https://www.api-football.com/) ingyenes csomag (100 kérés/nap), a kód 90-nél megáll.
-- Tippek: Poisson-modell a tabella hazai/vendég gólmutatóiból, összevetve a szorzókkal ("érték").
+- Tippek: Poisson-modell a csapatok hazai/vendég gólmutatóiból (saját eredményadatbázis), összevetve a szorzókkal ("érték").
 - Technika: Flask + SQLite, gunicorn, Caddy fordított proxy.
 
 A tippek statisztikai becslések, nem biztos nyerők. Szöglettippet ez a verzió nem ad (a szorzót megmutatja, ha van).
@@ -55,6 +55,10 @@ pytest
 
 ## Korlátok (ingyenes csomag)
 
-- Naponta kb. 100 kérés: sok meccses napon a kevésbé fontos ligáknál (a lista sorrendje a `collect.py`-ban) kimaradhat a H2H.
-- A kieséses szakaszokra (nincs tabella) a modell nem ad tippet.
-- A szorzók naponta egyszer frissülnek (Bet365).
+- Az API-Football ingyenes csomagja a **tabella-, szorzó- és sérült-végpontoknál csak a 2022–2024-es szezonokat engedi**.
+  Ezért a modell a csapatok formáját a saját eredményadatbázisból számolja (napi meccslista, ez működik).
+  Első használatkor töltsd vissza a múltat: `python collect.py backfill 45` (napi 1 kérés, a keret miatt több napra széthúzódhat).
+- A szorzókat és sérülteket többféle lekéréssel próbálja a program; ha az ingyenes csomag egyiket sem engedi,
+  a meccsoldalon üres marad (a napló írja a pontos okot). Fizetős csomagnál (Pro, 19 USD/hó) ez mind működik.
+- Kevés saját adatú csapatoknál (kevesebb mint 3 meccs) szorzó alapú tartalék tipp készül, ha van szorzó.
+- Szöglettippet a program nem ad.

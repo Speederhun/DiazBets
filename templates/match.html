@@ -22,14 +22,14 @@
 </table></div>
 <p class="note">{{ tips[0].note }} Az "érték" pozitív, ha a modell esélye alapján a szorzó többet fizet a kelleténél. Szöglettippet ebben a verzióban nem számolunk.</p>
 {% else %}
-<p class="note">Ehhez a meccshez nincs tipp (nincs elég tabella-adat, például kieséses szakasz).</p>
+<p class="note">Ehhez a meccshez nincs tipp (a csapatokról kevés eredmény van az adatbázisban, és szorzó sincs).</p>
 {% endif %}
 
 {% if form %}
-<h2>Forma</h2>
+<h2>Forma (utolsó 5, minden figyelt bajnokságból)</h2>
 <div class="card pad">
   {% for tid, t in form.items() %}
-  <div>{{ t.name }} ({{ t.rank }}. hely, {{ t.points }} pont)
+  <div>{{ t.name }} <span class="note">({{ t.hp + t.ap }} meccs az adatbázisban)</span>
     <span class="form">{% for c in t.form %}<span class="{{ c }}">{{ c }}</span>{% endfor %}</span></div>
   {% endfor %}
 </div>

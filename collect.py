@@ -3,6 +3,7 @@
 Használat:
     python collect.py collect [YYYY-MM-DD]   # meccsek, szorzók, sérültek, H2H, tippek
     python collect.py settle                 # tegnapi és mai eredmények, tippek elszámolása
+    python collect.py backfill [napok]       # múltbeli eredmények letöltése a modellhez (alap: 45 nap)
 """
 import json
 import sys
@@ -82,9 +83,16 @@ def store_fixtures(conn, items, day):
     return n
 
 
+def known_ids(conn):
+    return {r[0] for r in conn.execute("SELECT id FROM fixtures")}
+
+
 def store_odds(conn, items):
+    ids = known_ids(conn)
     for it in items:
         fid = it["fixture"]["id"]
+        if fid not in ids:
+            continue
         for bm in it.get("bookmakers", []):
             for bet in bm.get("bets", []):
                 market = BET_IDS.get(bet["id"])
@@ -109,8 +117,11 @@ def store_odds(conn, items):
 
 def store_injuries(conn, items):
     seen = set()
+    ids = known_ids(conn)
     for it in items:
         fid = it["fixture"]["id"]
+        if fid not in ids:
+            continue
         if fid not in seen:
             conn.execute("DELETE FROM injuries WHERE fixture_id = ?", (fid,))
             seen.add(fid)
@@ -123,6 +134,8 @@ def store_injuries(conn, items):
 
 
 def store_h2h(conn, fixture_id, items):
+    items = sorted((it for it in items if it["fixture"]["status"]["short"] == "FT"),
+                   key=lambda it: it["fixture"]["date"], reverse=True)[:5]
     rows = [{
         "date": it["fixture"]["date"][:10],
         "home": it["teams"]["home"]["name"], "away": it["teams"]["away"]["name"],
@@ -133,13 +146,13 @@ def store_h2h(conn, fixture_id, items):
     conn.commit()
 
 
-def fetch_paged(client, path, **params):
+def fetch_paged(client, path, max_pages=8, **params):
     out, page = [], 1
     while True:
         data = client.get(path, page=page, **params)
         out.extend(data.get("response", []))
         paging = data.get("paging") or {}
-        if page >= paging.get("total", 1):
+        if page >= paging.get("total", 1) or page >= max_pages:
             return out
         page += 1
 
@@ -149,10 +162,17 @@ def _safe(label, fn):
     try:
         fn()
         log(f"{label}: kész")
+        return True
     except BudgetExceeded:
         raise
     except Exception as e:  # noqa: BLE001 - a pontos okot ki akarjuk írni a naplóba
         log(f"{label}: HIBA – {type(e).__name__}: {e}")
+        return False
+
+
+def mark_day(conn, day):
+    conn.execute("INSERT OR IGNORE INTO fetched_days(day) VALUES (?)", (day,))
+    conn.commit()
 
 
 def collect(day=None):
@@ -163,62 +183,96 @@ def collect(day=None):
     try:
         data = client.get("fixtures", date=day, timezone="Europe/Budapest")
         n = store_fixtures(conn, data.get("response", []), day)
+        mark_day(conn, day)
         log(f"{day}: {n} meccs a figyelt ligákból")
 
-        fixtures = conn.execute(
-            "SELECT * FROM fixtures WHERE day = ? ORDER BY kickoff", (day,)).fetchall()
-        league_ids = sorted({f["league_id"] for f in fixtures}, key=lambda l: LEAGUE_ORDER.get(l, 99))
-        seasons = {f["league_id"]: f["season"] for f in fixtures}
-
-        for lid in league_ids:
-            name = dict(LEAGUES).get(lid, str(lid))
-            season = seasons[lid]
-
-            def get_standings(lid=lid, season=season):
-                have = conn.execute("SELECT 1 FROM standings WHERE league_id=? AND season=? AND fetched_day=?",
-                                    (lid, season, day)).fetchone()
-                if have:
-                    return
-                d = client.get("standings", league=lid, season=season)
-                if not d.get("response"):
-                    raise ApiError("a tabella üres (az API nem ad tabellát ehhez a ligához/szezonhoz)")
-                conn.execute("INSERT OR REPLACE INTO standings(league_id, season, fetched_day, json) VALUES (?,?,?,?)",
-                             (lid, season, day, json.dumps(d)))
-                conn.commit()
-
-            def get_odds(lid=lid, season=season):
-                items = fetch_paged(client, "odds", league=lid, season=season, date=day, bookmaker=BOOKMAKER)
-                if not items:
-                    # Bet365 nélkül próbáljuk bármelyik fogadóirodával
-                    items = fetch_paged(client, "odds", league=lid, season=season, date=day)
-                log(f"  {name}: {len(items)} meccshez van szorzó")
-                store_odds(conn, items)
-
-            def get_injuries(lid=lid, season=season):
-                items = fetch_paged(client, "injuries", league=lid, season=season, date=day)
-                log(f"  {name}: {len(items)} sérült/eltiltott")
-                store_injuries(conn, items)
-
-            _safe(f"{name} tabella", get_standings)
-            _safe(f"{name} szorzók", get_odds)
-            _safe(f"{name} sérültek", get_injuries)
-
+        fixtures = conn.execute("SELECT * FROM fixtures WHERE day = ? AND status = 'NS' ORDER BY kickoff",
+                                (day,)).fetchall()
         ordered = sorted(fixtures, key=lambda f: LEAGUE_ORDER.get(f["league_id"], 99))
+        if not ordered:
+            return
+
+        # Szorzók: előbb napra lekérve, ha az ingyenes csomag nem engedi, meccsenként próbáljuk
+        def odds_by_date():
+            items = fetch_paged(client, "odds", date=day, bookmaker=BOOKMAKER)
+            log(f"  szorzó {len(items)} meccshez (dátum szerint)")
+            store_odds(conn, items)
+            if not items:
+                raise ApiError("üres válasz")
+
+        def odds_by_fixture():
+            ok = 0
+            for f in ordered[:12]:
+                d = client.get("odds", fixture=f["id"], bookmaker=BOOKMAKER)
+                store_odds(conn, d.get("response", []))
+                ok += bool(d.get("response"))
+            log(f"  szorzó {ok} meccshez (meccsenként)")
+
+        if not _safe("szorzók (dátum szerint)", odds_by_date):
+            _safe("szorzók (meccsenként)", odds_by_fixture)
+
+        def injuries_by_date():
+            items = fetch_paged(client, "injuries", date=day)
+            log(f"  {len(items)} sérült/eltiltott (dátum szerint)")
+            store_injuries(conn, items)
+
+        def injuries_by_fixture():
+            total = 0
+            for f in ordered[:12]:
+                d = client.get("injuries", fixture=f["id"])
+                store_injuries(conn, d.get("response", []))
+                total += len(d.get("response", []))
+            log(f"  {total} sérült/eltiltott (meccsenként)")
+
+        if not _safe("sérültek (dátum szerint)", injuries_by_date):
+            _safe("sérültek (meccsenként)", injuries_by_fixture)
+
         for f in ordered:
             if conn.execute("SELECT 1 FROM h2h WHERE fixture_id=?", (f["id"],)).fetchone():
                 continue
 
             def get_h2h(f=f):
-                d = client.get("fixtures/headtohead", h2h=f"{f['home_id']}-{f['away_id']}", last=5)
+                d = client.get("fixtures/headtohead", h2h=f"{f['home_id']}-{f['away_id']}")
                 store_h2h(conn, f["id"], d.get("response", []))
 
-            _safe(f"H2H {f['home']}–{f['away']}", get_h2h)
+            if not _safe(f"H2H {f['home']}–{f['away']}", get_h2h):
+                break  # ha az első is elutasítva, a többit se kérjük
     except BudgetExceeded:
         log("Elfogyott a napi kéréskeret, a maradék kimarad.")
     except ApiError as e:
         log(f"API hiba: {e}")
     finally:
         generate_tips(conn, day)
+        conn.close()
+
+
+def backfill(days=45):
+    """Múltbeli eredmények letöltése (napi 1 kérés), ebből épül a csapatok formája és a modell."""
+    init_db()
+    conn = connect()
+    client = Client(conn)
+    from apifootball import DAILY_BUDGET, used_today
+    done = 0
+    try:
+        for i in range(1, days + 1):
+            d = (datetime.now(TZ) - timedelta(days=i)).strftime("%Y-%m-%d")
+            if conn.execute("SELECT 1 FROM fetched_days WHERE day=?", (d,)).fetchone():
+                continue
+            if used_today(conn) >= DAILY_BUDGET - 25:
+                log("A keret nagy része elfogyott, a visszatöltést holnap folytasd ugyanezzel a paranccsal.")
+                break
+            data = client.get("fixtures", date=d, timezone="Europe/Budapest")
+            n = store_fixtures(conn, data.get("response", []), d)
+            mark_day(conn, d)
+            done += 1
+            log(f"{d}: {n} meccs")
+    except BudgetExceeded:
+        log("Elfogyott a napi kéréskeret.")
+    except ApiError as e:
+        log(f"API hiba: {e}")
+    finally:
+        total = conn.execute("SELECT COUNT(*) FROM fixtures WHERE status='FT'").fetchone()[0]
+        log(f"{done} nap letöltve, összesen {total} lejátszott meccs az adatbázisban")
         conn.close()
 
 
@@ -230,27 +284,17 @@ def load_odds(conn, fixture_id):
 
 
 def generate_tips(conn, day):
-    tables = {}
+    teams, avg_h, avg_a = model.load_results_table(conn, day)
     count = 0
     for f in conn.execute("SELECT * FROM fixtures WHERE day = ? AND status = 'NS'", (day,)).fetchall():
-        key = (f["league_id"], f["season"])
-        if key not in tables:
-            row = conn.execute("SELECT json FROM standings WHERE league_id=? AND season=?", key).fetchone()
-            if not row:
-                tables[key] = None
-            else:
-                rows = model.flatten_standings(json.loads(row["json"]))
-                tables[key] = model.team_table(rows)
         odds = load_odds(conn, f["id"])
         xg = None
-        if tables[key]:
-            teams, avg_h, avg_a = tables[key]
+        if avg_h and model.enough_data(teams, f["home_id"], f["away_id"]):
             xg = model.expected_goals(teams, avg_h, avg_a, f["home_id"], f["away_id"])
         if xg:
-            probs = model.probabilities(*xg)
-            new_tips = model.build_tips(probs, odds, *xg)
+            new_tips = model.build_tips(model.probabilities(*xg), odds, *xg)
         else:
-            # Nincs tabella-adat (pl. kieséses szakasz, új liga): szorzó alapú tartalék tipp
+            # Kevés saját adat: szorzó alapú tartalék tipp (ha van szorzó)
             new_tips = model.tips_from_odds(odds)
         for t in new_tips:
             conn.execute(
@@ -263,7 +307,7 @@ def generate_tips(conn, day):
             )
             count += 1
     conn.commit()
-    log(f"{count} tipp generálva")
+    log(f"{count} tipp generálva ({len(teams)} csapat adata alapján)")
 
 
 # ---------------------------------------------------------------- elszámolás
@@ -322,6 +366,8 @@ if __name__ == "__main__":
         collect(sys.argv[2] if len(sys.argv) > 2 else None)
     elif cmd == "settle":
         settle()
+    elif cmd == "backfill":
+        backfill(int(sys.argv[2]) if len(sys.argv) > 2 else 45)
     else:
         print(__doc__)
         sys.exit(1)

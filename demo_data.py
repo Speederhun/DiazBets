@@ -9,25 +9,21 @@ from db import connect, init_db
 TZ = ZoneInfo("Europe/Budapest")
 
 
-def _standing(tid, name, rank, form, hp, hgf, hga, ap, agf, aga):
-    return {"rank": rank, "team": {"id": tid, "name": name}, "points": 20 + rank, "form": form,
-            "home": {"played": hp, "goals": {"for": hgf, "against": hga}},
-            "away": {"played": ap, "goals": {"for": agf, "against": aga}}}
-
-
 def load():
     init_db()
     conn = connect()
     today = datetime.now(TZ).strftime("%Y-%m-%d")
     yesterday = (datetime.now(TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
-    rows = [
-        _standing(1, "Demo FC", 1, "WWWDW", 6, 16, 4, 5, 10, 5),
-        _standing(2, "Példa United", 2, "WDWLW", 6, 12, 6, 5, 8, 7),
-        _standing(3, "Minta SC", 3, "LDWWL", 5, 9, 7, 6, 7, 9),
-        _standing(4, "Teszt Rovers", 4, "LLDLW", 6, 6, 10, 5, 4, 11),
-    ]
-    st = {"response": [{"league": {"standings": [rows]}}]}
-    conn.execute("INSERT OR REPLACE INTO standings VALUES (39, 2026, ?, ?)", (today, json.dumps(st)))
+    names = {1: "Demo FC", 2: "Példa United", 3: "Minta SC", 4: "Teszt Rovers"}
+    past = [(1, 2, 2, 1), (3, 4, 1, 1), (2, 3, 2, 0), (4, 1, 0, 3), (1, 3, 3, 1), (2, 4, 2, 1),
+            (3, 1, 1, 2), (4, 2, 1, 1), (1, 4, 4, 0), (2, 1, 1, 1), (3, 2, 0, 1), (4, 3, 2, 2)]
+    for k, (h, a, hg, ag) in enumerate(past):
+        day = (datetime.now(TZ) - timedelta(days=k + 3)).strftime("%Y-%m-%d")
+        ko = datetime.fromisoformat(f"{day}T20:00:00").replace(tzinfo=TZ).isoformat()
+        conn.execute("""INSERT OR REPLACE INTO fixtures(id, day, kickoff, league_id, league_name, country, season,
+            home_id, home, home_logo, away_id, away, away_logo, status, home_goals, away_goals)
+            VALUES (?,?,?,39,'Premier League','England',2026,?,?,NULL,?,?,NULL,'FT',?,?)""",
+                     (8000 + k, day, ko, h, names[h], a, names[a], hg, ag))
     fx = [
         (9001, today, 39, "Premier League", "England", 1, "Demo FC", 4, "Teszt Rovers", "NS", None, None, 20),
         (9002, today, 39, "Premier League", "England", 2, "Példa United", 3, "Minta SC", "NS", None, None, 18),

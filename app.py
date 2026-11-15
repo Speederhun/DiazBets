@@ -137,15 +137,9 @@ def match(fid):
     injuries = conn.execute("SELECT * FROM injuries WHERE fixture_id = ? ORDER BY team, player", (fid,)).fetchall()
     h = conn.execute("SELECT json FROM h2h WHERE fixture_id = ?", (fid,)).fetchone()
     h2h = json.loads(h["json"]) if h else None
-    st = conn.execute("SELECT json FROM standings WHERE league_id = ? AND season = ?",
-                      (f["league_id"], f["season"])).fetchone()
-    form = {}
-    if st:
-        import model
-        teams, _, _ = model.team_table(model.flatten_standings(json.loads(st["json"])))
-        for tid in (f["home_id"], f["away_id"]):
-            if tid in teams:
-                form[tid] = teams[tid]
+    import model
+    teams, _, _ = model.load_results_table(conn, f["day"])
+    form = {tid: teams[tid] for tid in (f["home_id"], f["away_id"]) if tid in teams}
     conn.close()
     h2h_summary = None
     if h2h:

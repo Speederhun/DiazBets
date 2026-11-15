@@ -126,3 +126,48 @@ def tips_from_odds(odds):
         tips.append({"market": market, "pick": sels[best], "prob": inv[best] / total,
                      "odds": prices[best], "value": None, "note": note})
     return tips
+
+
+MIN_GAMES = 3  # csapatonként ennyi lejátszott meccs kell a saját becsléshez
+
+
+def team_table_from_results(rows):
+    """rows: lejátszott meccsek időrendben (home_id, home, away_id, away, hg, ag).
+    Ugyanazt a szerkezetet adja, mint a team_table, de a saját eredményadatbázisból."""
+    teams = {}
+    tot_h = tot_a = n = 0
+
+    def t(tid, name):
+        return teams.setdefault(tid, {"name": name, "form": "", "rank": None, "points": None,
+                                      "hp": 0, "hgf": 0, "hga": 0, "ap": 0, "agf": 0, "aga": 0})
+
+    for r in rows:
+        h, a = t(r["home_id"], r["home"]), t(r["away_id"], r["away"])
+        hg, ag = r["hg"], r["ag"]
+        h["hp"] += 1; h["hgf"] += hg; h["hga"] += ag
+        a["ap"] += 1; a["agf"] += ag; a["aga"] += hg
+        h["form"] = (h["form"] + ("W" if hg > ag else "D" if hg == ag else "L"))[-5:]
+        a["form"] = (a["form"] + ("W" if ag > hg else "D" if hg == ag else "L"))[-5:]
+        tot_h += hg
+        tot_a += ag
+        n += 1
+    if n == 0:
+        return teams, None, None
+    return teams, tot_h / n, tot_a / n
+
+
+def load_results_table(conn, upto_day, days=150):
+    from datetime import datetime, timedelta
+    cutoff = (datetime.strptime(upto_day, "%Y-%m-%d") - timedelta(days=days)).strftime("%Y-%m-%d")
+    rows = conn.execute(
+        """SELECT home_id, home, away_id, away, home_goals AS hg, away_goals AS ag
+           FROM fixtures WHERE status = 'FT' AND home_goals IS NOT NULL AND away_goals IS NOT NULL
+             AND day >= ? AND day <= ? ORDER BY kickoff""", (cutoff, upto_day)).fetchall()
+    return team_table_from_results(rows)
+
+
+def enough_data(teams, home_id, away_id):
+    def games(tid):
+        t = teams.get(tid)
+        return (t["hp"] + t["ap"]) if t else 0
+    return games(home_id) >= MIN_GAMES and games(away_id) >= MIN_GAMES

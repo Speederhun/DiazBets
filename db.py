@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS standings (
     json TEXT NOT NULL,
     PRIMARY KEY (league_id, season)
 );
+CREATE TABLE IF NOT EXISTS fetched_days (
+    day TEXT PRIMARY KEY
+);
 CREATE TABLE IF NOT EXISTS tips (
     fixture_id INTEGER NOT NULL,
     market TEXT NOT NULL,
